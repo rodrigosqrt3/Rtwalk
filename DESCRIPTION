@@ -1,0 +1,34 @@
+Package: twalkR
+Type: Package
+Title: An MCMC Sampler Using the t-walk Algorithm
+Version: 0.1.0
+Authors@R: person("Rodrigo Fonseca", "Villa", email = "rodrigo03.villa@gmail.com", role = c("aut", "cre"))
+Maintainer: Rodrigo Fonseca Villa <rodrigo03.villa@gmail.com>
+Description: Implements the t-walk algorithm, a general-purpose, self-adjusting
+    Markov Chain Monte Carlo (MCMC) sampler for continuous distributions as
+    described by Christen & Fox (2010) <doi:10.1214/10-BA603>. The t-walk requires
+    no tuning and is robust for a wide range of target distributions, including
+    high-dimensional and multimodal problems. This implementation includes an
+    option for running multiple chains in parallel to accelerate sampling and
+    facilitate convergence diagnostics.
+License: GPL-3
+Encoding: UTF-8
+RoxygenNote: 7.3.2
+Imports: 
+    parallel,
+    stats,
+    utils
+Suggests: 
+    mvtnorm,
+    coda,
+    devtools,
+    roxygen2,
+    knitr,
+    rmarkdown,
+    ellipse, 
+    ggplot2,
+    ggthemes,
+    gridExtra,
+    reshape2,
+    viridis
+VignetteBuilder: knitr

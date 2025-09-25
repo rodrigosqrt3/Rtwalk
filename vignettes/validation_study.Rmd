@@ -1,0 +1,251 @@
+---
+title: "Validation and Simulation Study for the twalkR Package"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Validation and Simulation Study}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, 
+  comment = NA,   
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 8,
+  fig.height = 6,
+  warning = FALSE,
+  message = FALSE,
+  dev = 'svg',      
+  fig.align = 'center', 
+  dpi = 300,     
+  out.width = "95%",
+  results = "hide"
+)
+```
+
+## Introduction
+
+This document presents the Monte Carlo study used to validate the implementation of the `twalkR` package. The objective is to demonstrate that the sampler behaves as expected across a variety of challenging scenarios, replicating classic tests from the MCMC literature.
+
+```{r setup, message=FALSE, warning=FALSE}
+library(twalkR)
+library(mvtnorm)
+library(coda)
+```
+
+## Analysis and Visualization Functions
+
+```{r analysis-functions}
+calculate_diagnostics <- function(samples, burnin_frac = 0.2, param_names = NULL, title = "") {
+  n_iter <- nrow(samples)
+  n_burnin <- floor(burnin_frac * n_iter)
+  post_burnin_samples <- samples[(n_burnin + 1):n_iter, , drop = FALSE]
+  n_param <- ncol(samples)
+  
+  if (is.null(param_names)) {
+    param_names <- paste0("theta", 1:n_param)
+  }
+  
+  means <- apply(post_burnin_samples, 2, mean)
+  sds <- apply(post_burnin_samples, 2, sd)
+  quantiles <- apply(post_burnin_samples, 2, quantile, probs = c(0.025, 0.5, 0.975))
+  
+  chain <- coda::as.mcmc(post_burnin_samples)
+  ess <- coda::effectiveSize(chain)
+  
+  results_table <- data.frame(
+    Parameter = param_names, 
+    Mean = round(means, 4), 
+    SD = round(sds, 4),
+    Q2.5 = round(quantiles["2.5%", ], 4), 
+    Median = round(quantiles["50%", ], 4),
+    Q97.5 = round(quantiles["97.5%", ], 4), 
+    ESS = round(ess, 0)
+  )
+  
+  cat("\nCONVERGENCE DIAGNOSTICS -", title, "\n")
+  print(results_table, row.names = FALSE)
+  return(invisible(results_table))
+}
+
+visualize_results <- function(samples, true_values = NULL,
+                              title = "Results", burnin_frac = 0.2,
+                              true_covariance = NULL, show_acf = TRUE) {
+  n_total <- nrow(samples)
+  start_index <- ceiling(n_total * burnin_frac) + 1
+  analysis_samples <- samples[start_index:n_total, , drop = FALSE]
+  n_dim <- ncol(analysis_samples)
+  
+  oldpar <- par(no.readonly = TRUE)
+  on.exit(par(oldpar))
+
+  colors <- c("#2E86AB", "#A23B72", "#F18F01", "#C73E1D", "#7209B7", "#2F9599")
+  bg_color <- "#FAFAFA"
+  
+  if (n_dim == 1) {
+    layout(matrix(c(1, 2, 3, 3), 2, 2, byrow = TRUE))
+    par(mar = c(4, 4, 3, 1), bg = bg_color, col.axis = "gray30", col.lab = "gray30", col.main = "gray20")
+    
+    hist(analysis_samples[,1], main = paste(title, "- Distribution"), 
+         xlab = bquote(theta[1]), freq = FALSE, col = colors[1], border = "white", 
+         breaks = 30, las = 1)
+    
+    plot(samples[start_index:n_total, 1], type = 'l', col = colors[1], lwd = 0.8,
+         main = paste(title, "- Trace"), xlab = "Iteration", ylab = bquote(theta[1]), las = 1)
+    
+    if (show_acf) {
+      acf(analysis_samples[,1], main = paste(title, "- Autocorrelation"), 
+          col = colors[2], lwd = 2, las = 1)
+    }
+    
+  } else if (n_dim == 2) {
+    layout(matrix(c(1, 2, 3, 4), 2, 2, byrow = TRUE))
+    par(mar = c(4, 4, 3, 1), bg = bg_color, col.axis = "gray30", col.lab = "gray30", col.main = "gray20")
+    
+    plot(analysis_samples, pch = ".", col = adjustcolor(colors[1], alpha = 0.6), 
+         main = title, xlab = bquote(theta[1]), ylab = bquote(theta[2]), las = 1,
+         cex = 1.2)
+    if (!is.null(true_covariance) && requireNamespace("ellipse", quietly = TRUE)) {
+      lines(ellipse::ellipse(true_covariance, centre = true_values), col = colors[2], lwd = 2)
+    }
+    
+    plot(samples[start_index:n_total, 1], type = 'l', col = colors[1], lwd = 0.8,
+         main = bquote(paste("Trace ", theta[1])), xlab = "Iteration", ylab = bquote(theta[1]), las = 1)
+    
+    plot(samples[start_index:n_total, 2], type = 'l', col = colors[2], lwd = 0.8,
+         main = bquote(paste("Trace ", theta[2])), xlab = "Iteration", ylab = bquote(theta[2]), las = 1)
+    
+    dens1 <- density(analysis_samples[,1])
+    plot(dens1, main = bquote(paste("Marginal Density ", theta[1])), xlab = bquote(theta[1]), 
+         col = colors[1], lwd = 3, las = 1, zero.line = FALSE)
+    polygon(dens1, col = adjustcolor(colors[1], alpha = 0.3), border = NA)
+    
+  } else {
+    n_plots <- min(6, n_dim)
+    if (n_plots <= 4) {
+      layout(matrix(1:4, 2, 2, byrow = TRUE))
+    } else {
+      layout(matrix(1:6, 3, 2, byrow = TRUE))
+    }
+    
+    par(mar = c(4, 4, 3, 1), bg = bg_color, col.axis = "gray30", col.lab = "gray30", col.main = "gray20")
+    
+    for (i in 1:n_plots) {
+      if (i <= 3) {
+        plot(samples[start_index:n_total, i], type = 'l', col = colors[i], lwd = 0.8,
+             main = bquote(paste("Trace ", theta[.(i)])), 
+             xlab = "Iteration", ylab = bquote(theta[.(i)]), las = 1)
+      } else {
+        dens <- density(analysis_samples[,i])
+        plot(dens, main = bquote(paste("Density ", theta[.(i)])), 
+             xlab = bquote(theta[.(i)]), col = colors[i], lwd = 3, las = 1, zero.line = FALSE)
+        polygon(dens, col = adjustcolor(colors[i], alpha = 0.3), border = NA)
+      }
+    }
+    
+    if (n_dim > 6) {
+      cat("\nNote: Only showing first 6 dimensions. Total dimensions:", n_dim, "\n")
+    }
+  }
+}
+```
+
+## Test Battery
+
+```{r run-all-tests, eval=TRUE, cache=TRUE}
+N_ITER_VIGNETTE <- 50000
+BURN_FRAC <- 0.2
+
+# --- TEST 1: Standard Univariate Normal ---
+log_posterior_1 <- function(x) dnorm(x, log = TRUE)
+result_1 <- twalk(log_posterior_1, n_iter = N_ITER_VIGNETTE, x0 = -2, xp0 = 2)
+calculate_diagnostics(result_1$all_samples, BURN_FRAC, "theta", "Standard Normal")
+visualize_results(result_1$all_samples, 0, "Test 1: Standard Normal")
+```
+
+```{r}
+# --- TEST 2: Correlated Bivariate Normal ---
+true_mean_2 <- c(1, -0.5)
+true_cov_2 <- matrix(c(4, 0.7*2*1.5, 0.7*2*1.5, 2.25), 2, 2)
+log_posterior_2 <- function(x) mvtnorm::dmvnorm(x, mean = true_mean_2, sigma = true_cov_2, log = TRUE)
+result_2 <- twalk(log_posterior_2, n_iter = N_ITER_VIGNETTE, x0 = c(0,0), xp0 = c(2,-1))
+calculate_diagnostics(result_2$all_samples, BURN_FRAC, c("theta1", "theta2"), "Bivariate Normal")
+visualize_results(result_2$all_samples, true_mean_2, "Test 2: Bivariate Normal", true_covariance = true_cov_2)
+```
+
+```{r}
+# --- TEST 3: Funnel Distribution ---
+log_posterior_3 <- function(x) {
+  x1 <- x[1]
+  x2 <- x[2]
+  log_prior_x1 <- dnorm(x1, mean = 0, sd = 3, log = TRUE)
+  log_lik_x2 <- dnorm(x2, mean = 0, sd = exp(x1 / 2), log = TRUE)
+  return(log_prior_x1 + log_lik_x2)
+}
+result_3 <- twalk(log_posterior_3, n_iter = N_ITER_VIGNETTE, x0 = c(-1.5, -0.2), xp0 = c(1.5, -0.2))
+calculate_diagnostics(result_3$all_samples, BURN_FRAC, c("theta1", "theta2"), "Funnel")
+visualize_results(result_3$all_samples, NULL, "Test 3: Funnel")
+```
+
+```{r}
+# --- TEST 4: Rosenbrock Distribution ---
+log_posterior_4 <- function(x) {
+  x1 <- x[1]
+  x2 <- x[2]
+  k <- 1 / 20 
+  return(-k * (100 * (x2 - x1^2)^2 + (1 - x1)^2))
+}
+result_4 <- twalk(log_posterior_4, n_iter = 100000, x0 = c(0,0), xp0 = c(-1,1))
+calculate_diagnostics(result_4$all_samples, BURN_FRAC, c("theta1", "theta2"), "Rosenbrock")
+visualize_results(result_4$all_samples, c(1,1), "Test 4: Rosenbrock")
+```
+
+```{r}
+# --- TEST 5: Gaussian Mixture ---
+weight1 <- 0.7; mean1 <- c(6, 0); sigma1_1 <- 4; sigma1_2 <- 5; rho1 <- 0.8
+cov1 <- matrix(c(sigma1_1^2, rho1*sigma1_1*sigma1_2, rho1*sigma1_1*sigma1_2, sigma1_2^2), nrow=2)
+
+weight2 <- 0.3; mean2 <- c(-3, 10); sigma2_1 <- 1; sigma2_2 <- 1; rho2 <- 0.1
+cov2 <- matrix(c(sigma2_1^2, rho2*sigma2_1*sigma2_2, rho2*sigma2_1*sigma2_2, sigma2_2^2), nrow=2)
+
+log_posterior_5 <- function(x) {
+  log(weight1 * mvtnorm::dmvnorm(x, mean1, cov1) + weight2 * mvtnorm::dmvnorm(x, mean2, cov2))
+}
+
+result_5 <- twalk(log_posterior_5, n_iter = 100000, x0 = mean1, xp0 = mean2)
+calculate_diagnostics(result_5$all_samples, BURN_FRAC, c("theta1", "theta2"), "Gaussian Mixture")
+visualize_results(result_5$all_samples, NULL, "Test 5: Gaussian Mixture")
+```
+
+```{r}
+# --- TEST 6: High Dimensionality (10D) ---
+n_dim_6 <- 10; true_mean_6 <- 1:n_dim_6; rho <- 0.7
+true_cov_6 <- matrix(rho^abs(outer(1:n_dim_6, 1:n_dim_6, "-")), n_dim_6, n_dim_6)
+log_posterior_6 <- function(x) mvtnorm::dmvnorm(x, mean = true_mean_6, sigma = true_cov_6, log = TRUE)
+result_6 <- twalk(log_posterior_6, n_iter = N_ITER_VIGNETTE, x0 = rep(0, n_dim_6), xp0 = rep(2, n_dim_6))
+calculate_diagnostics(result_6$all_samples, BURN_FRAC, paste0("theta", 1:n_dim_6), "10D Normal")
+visualize_results(result_6$all_samples, true_mean_6, "Test 6: 10D Normal")
+```
+
+```{r}
+# --- TEST 7: Bayesian Logistic Regression ---
+set.seed(123); n_obs <- 2000
+true_beta <- c(0.5, -1.2, 0.8)
+X <- cbind(1, rnorm(n_obs, 0, 1), rnorm(n_obs, 0, 1.5))
+eta <- X %*% true_beta; prob <- 1 / (1 + exp(-eta)); y <- rbinom(n_obs, 1, prob)
+log_posterior_7 <- function(beta, X, y) { 
+  eta <- X %*% beta
+  log_lik <- sum(y * eta - log(1 + exp(eta)))
+  log_prior <- sum(dnorm(beta, 0, 5, log = TRUE))
+  return(log_lik + log_prior) 
+}
+result_7 <- twalk(log_posterior_7, n_iter = N_ITER_VIGNETTE, x0 = c(0,0,0), xp0 = c(0.2,-0.2,0.1), X = X, y = y)
+calculate_diagnostics(result_7$all_samples, BURN_FRAC, c("beta0", "beta1", "beta2"), "Logistic Regression")
+visualize_results(result_7$all_samples, true_beta, "Test 7: Logistic Regression")
+```
+
+## Study Conclusion
+
+The results from the test battery demonstrate that this implementation of the t-walk is robust and behaves as expected. The sampler was able to converge and efficiently explore distributions with high correlation and multimodality without the need for manual tuning, validating its utility as a general-purpose tool for Bayesian inference.
