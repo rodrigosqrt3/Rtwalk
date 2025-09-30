@@ -1,6 +1,6 @@
-# twalkR: An MCMC Sampler Using the t-walk Algorithm
+# Rtwalk: An MCMC Sampler Using the t-walk Algorithm
 
-`twalkR` is an R implementation of the **t-walk**, a general-purpose Markov Chain Monte Carlo (MCMC) sampler for continuous distributions, ideal for Bayesian inference problems.
+`Rtwalk` is an R implementation of the **t-walk**, a general-purpose Markov Chain Monte Carlo (MCMC) sampler for continuous distributions, ideal for Bayesian inference problems.
 
 ## Overview
 
@@ -8,21 +8,21 @@ This package provides a implementation of the t-walk algorithm, as originally pr
 
 ## Installation
 
-You can install the development version of `twalkR` from GitHub using the `devtools` package:
+You can install the development version of `Rtwalk` from GitHub using the `devtools` package:
 
 ```r
 # If you don't have the devtools package, install it first
 # install.packages("devtools")
 
-devtools::install_github("rodrigosqrt3/twalkR", build_vignettes = TRUE)
+devtools::install_github("rodrigosqrt3/Rtwalk", build_vignettes = TRUE)
 ```
 
 ## Example Usage
 
-Here is a simple example of how to use `twalkR` to sample from a bimodal distribution.
+Here is a simple example of how to use `Rtwalk` to sample from a bimodal distribution.
 
 ```r
-library(twalkR)
+library(Rtwalk)
 
 # Define the log-posterior density of the target distribution
 # In this case, a mixture of two normal distributions
@@ -54,10 +54,11 @@ plot(samples, type = 'l', col = "grey30",
 
 ## Citation
 
-This package is an implementation of the algorithm described in the following paper. If you use `twalkR` in your research, please cite the original work:
+This package is an implementation of the algorithm described in the following paper. If you use `Rtwalk` in your research, please cite the original work:
 
 > Christen, J. A., & Fox, C. (2010). A general purpose sampling algorithm for continuous distributions (the t-walk). *Bayesian Analysis*, 5(2), 263-282. [doi:10.1214/10-BA603](https://doi.org/10.1214/10-BA603)
 
 ## License
+
 
 This package is licensed under the GPL-3. See the `LICENSE` file for more details.
