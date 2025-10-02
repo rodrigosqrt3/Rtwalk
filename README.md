@@ -60,5 +60,4 @@ This package is an implementation of the algorithm described in the following pa
 
 ## License
 
-
 This package is licensed under the GPL-3. See the `LICENSE` file for more details.
