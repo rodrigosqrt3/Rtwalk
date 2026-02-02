@@ -1,3 +1,5 @@
+[![CRAN status](https://www.r-pkg.org/badges/version/Rtwalk)](https://CRAN.R-project.org/package=Rtwalk)
+
 # Rtwalk: An MCMC Sampler Using the t-walk Algorithm
 
 `Rtwalk` is an R implementation of the **t-walk**, a general-purpose Markov Chain Monte Carlo (MCMC) sampler for continuous distributions, ideal for Bayesian inference problems.
@@ -59,5 +61,6 @@ This package is an implementation of the algorithm described in the following pa
 > Christen, J. A., & Fox, C. (2010). A general purpose sampling algorithm for continuous distributions (the t-walk). *Bayesian Analysis*, 5(2), 263-282. [doi:10.1214/10-BA603](https://doi.org/10.1214/10-BA603)
 
 ## License
+
 
 This package is licensed under the GPL-3. See the `LICENSE` file for more details.
