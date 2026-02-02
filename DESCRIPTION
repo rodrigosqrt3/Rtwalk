@@ -1,7 +1,7 @@
 Package: Rtwalk
 Type: Package
-Title: An MCMC Sampler Using the t-walk Algorithm
-Version: 0.1.0
+Title: An MCMC Sampler Using the t-Walk Algorithm
+Version: 2.0.0
 Authors@R: person("Rodrigo Fonseca", "Villa", email = "rodrigo03.villa@gmail.com", role = c("aut", "cre"))
 Maintainer: Rodrigo Fonseca Villa <rodrigo03.villa@gmail.com>
 Description: Implements the t-walk algorithm, a general-purpose, self-adjusting
