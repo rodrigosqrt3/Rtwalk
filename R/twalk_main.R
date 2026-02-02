@@ -48,7 +48,7 @@
 #'   plot(result_seq$all_samples, pch = '.', main = "t-walk Samples (Sequential)")
 #' }
 #'
-#' \dontrun{
+#' \donttest{
 #' # Example 2: The same problem in parallel (will run faster)
 #' # Using 2 chains. n_iter is now per chain.
 #' if (requireNamespace("mvtnorm", quietly = TRUE)) {
@@ -60,7 +60,7 @@
 #' }
 #' }
 twalk <- function(log_posterior, n_iter, x0, xp0,
-                      n_chains = 1, n_cores = NULL, ...) {
+                  n_chains = 1, n_cores = NULL, ...) {
 
   # Capture all extra arguments in a list
   extra_args <- list(...)
@@ -71,7 +71,7 @@ twalk <- function(log_posterior, n_iter, x0, xp0,
     is_internal_call <- "internal_call" %in% names(extra_args)
 
     if (!is_internal_call) {
-      cat("--- Running t-walk in sequential mode (1 chain) ---\n")
+      message("--- Running t-walk in sequential mode (1 chain) ---")
     }
 
     n_dim <- length(x0)
@@ -139,7 +139,7 @@ twalk <- function(log_posterior, n_iter, x0, xp0,
 
     acceptance_rate <- accepted_count / n_iter
     if (use_progress_bar) {
-      cat(sprintf("\nAcceptance rate: %.2f%%\n", acceptance_rate * 100))
+      message(sprintf("\nAcceptance rate: %.2f%%", acceptance_rate * 100))
     }
 
     return(list(
@@ -158,14 +158,13 @@ twalk <- function(log_posterior, n_iter, x0, xp0,
     }
     n_cores_used <- min(n_chains, n_cores)
 
-    cat(sprintf("--- Running t-walk in PARALLEL mode (%d chains on %d cores) ---\n", n_chains, n_cores_used))
+    message(sprintf("--- Running t-walk in PARALLEL mode (%d chains on %d cores) ---", n_chains, n_cores_used))
 
     cl <- parallel::makeCluster(n_cores_used)
     on.exit(parallel::stopCluster(cl))
 
-    # Export all necessary objects and functions from the global environment
-    all_objects <- ls(.GlobalEnv)
-    parallel::clusterExport(cl, varlist = all_objects, envir = .GlobalEnv)
+    # Export the log_posterior function and extra_args to cluster workers
+    parallel::clusterExport(cl, varlist = c("log_posterior", "extra_args", "x0", "xp0", "n_iter"), envir = environment())
 
     # Load required packages on each worker node
     parallel::clusterEvalQ(cl, {
@@ -193,14 +192,14 @@ twalk <- function(log_posterior, n_iter, x0, xp0,
       return(chain_result)
     }
 
-    cat("Distributing work among cores...\n")
+    message("Distributing work among cores...")
     results_list <- parallel::parLapply(cl, 1:n_chains, run_single_chain)
 
-    cat("Chains completed. Combining results...\n")
+    message("Chains completed. Combining results...")
 
     combined_samples <- do.call(rbind, lapply(results_list, function(res) res$all_samples))
     mean_acceptance_rate <- mean(sapply(results_list, function(res) res$acceptance_rate))
-    cat(sprintf("\nMean acceptance rate across chains: %.2f%%\n", mean_acceptance_rate * 100))
+    message(sprintf("\nMean acceptance rate across chains: %.2f%%", mean_acceptance_rate * 100))
 
     return(list(
       all_samples = combined_samples,
