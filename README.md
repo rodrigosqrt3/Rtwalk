@@ -10,13 +10,10 @@ This package provides a implementation of the t-walk algorithm, as originally pr
 
 ## Installation
 
-You can install the development version of `Rtwalk` from GitHub using the `devtools` package:
+The stable version of `Rtwalk` is available on CRAN and can be installed with:
 
 ```r
-# If you don't have the devtools package, install it first
-# install.packages("devtools")
-
-devtools::install_github("rodrigosqrt3/Rtwalk", build_vignettes = TRUE)
+install.packages("Rtwalk")
 ```
 
 ## Example Usage
@@ -64,3 +61,4 @@ This package is an implementation of the algorithm described in the following pa
 
 
 This package is licensed under the GPL-3. See the `LICENSE` file for more details.
+
