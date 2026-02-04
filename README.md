@@ -6,11 +6,11 @@
 
 ## Overview
 
-This package provides a implementation of the t-walk algorithm, as originally proposed by Christen & Fox (2010). The t-walk is a robust, self-adjusting MCMC sampler, which means it does not require the tedious manual tuning of proposal parameters. It is designed to efficiently explore a wide range of target distributions, maintaining good performance even in high-dimensional or multimodal problems.
+This package provides an implementation of the t-walk algorithm, as originally proposed by Christen & Fox (2010). The t-walk is a robust, self-adjusting MCMC sampler, which means it does not require the tedious manual tuning of proposal parameters. It is designed to efficiently explore a wide range of target distributions, maintaining good performance even in high-dimensional or multimodal problems.
 
 ## Installation
 
-The stable version of `Rtwalk` is available on CRAN and can be installed with:
+The stable version of Rtwalk is available on CRAN and can be installed with:
 
 ```r
 install.packages("Rtwalk")
@@ -59,6 +59,4 @@ This package is an implementation of the algorithm described in the following pa
 
 ## License
 
-
 This package is licensed under the GPL-3. See the `LICENSE` file for more details.
-
