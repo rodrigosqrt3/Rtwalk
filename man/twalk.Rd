@@ -58,7 +58,7 @@ if (requireNamespace("mvtnorm", quietly = TRUE)) {
   plot(result_seq$all_samples, pch = '.', main = "t-walk Samples (Sequential)")
 }
 
-\dontrun{
+\donttest{
 # Example 2: The same problem in parallel (will run faster)
 # Using 2 chains. n_iter is now per chain.
 if (requireNamespace("mvtnorm", quietly = TRUE)) {
