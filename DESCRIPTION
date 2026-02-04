@@ -1,8 +1,8 @@
 Package: Rtwalk
 Type: Package
 Title: An MCMC Sampler Using the t-Walk Algorithm
-Version: 2.0.0
-Authors@R: person("Rodrigo Fonseca", "Villa", email = "rodrigo03.villa@gmail.com", role = c("aut", "cre"))
+Version: 2.0.1
+Authors@R: person("Rodrigo Fonseca", "Villa", email = "rodrigo03.villa@gmail.com", role = c("aut", "cre"), comment = c(ORCID = "0009-0005-2938-2270"))
 Maintainer: Rodrigo Fonseca Villa <rodrigo03.villa@gmail.com>
 Description: Implements the t-walk algorithm, a general-purpose, self-adjusting
     Markov Chain Monte Carlo (MCMC) sampler for continuous distributions as
@@ -14,24 +14,20 @@ Description: Implements the t-walk algorithm, a general-purpose, self-adjusting
 License: GPL-3
 Encoding: UTF-8
 RoxygenNote: 7.3.2
-Imports: 
+Imports:
     parallel,
     stats,
-    utils
-Suggests: 
+    utils,
+    graphics,
+    grDevices,
+    coda
+Suggests:
     mvtnorm,
-    coda,
     devtools,
     roxygen2,
     knitr,
     rmarkdown,
-    ellipse, 
-    ggplot2,
-    ggthemes,
-    gridExtra,
-    reshape2,
-    viridis
+    ellipse,
 VignetteBuilder: knitr
 URL: https://github.com/rodrigosqrt3/Rtwalk
 BugReports: https://github.com/rodrigosqrt3/Rtwalk/issues
-
