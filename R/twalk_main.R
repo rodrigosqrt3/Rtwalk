@@ -142,11 +142,14 @@ twalk <- function(log_posterior, n_iter, x0, xp0,
       message(sprintf("\nAcceptance rate: %.2f%%", acceptance_rate * 100))
     }
 
-    return(list(
-      all_samples = rbind(x_samples, xp_samples),
-      acceptance_rate = acceptance_rate,
-      n_iter = n_iter,
-      n_dim = n_dim
+    return(structure(
+      list(
+        all_samples = rbind(x_samples, xp_samples),
+        acceptance_rate = acceptance_rate,
+        n_iter = n_iter,
+        n_dim = n_dim
+      ),
+      class = "twalk"
     ))
   }
 
@@ -201,12 +204,15 @@ twalk <- function(log_posterior, n_iter, x0, xp0,
     mean_acceptance_rate <- mean(sapply(results_list, function(res) res$acceptance_rate))
     message(sprintf("\nMean acceptance rate across chains: %.2f%%", mean_acceptance_rate * 100))
 
-    return(list(
-      all_samples = combined_samples,
-      acceptance_rate = mean_acceptance_rate,
-      total_iterations = n_iter * n_chains,
-      n_dim = length(x0),
-      individual_chains = results_list
+    return(structure(
+      list(
+        all_samples = combined_samples,
+        acceptance_rate = mean_acceptance_rate,
+        total_iterations = n_iter * n_chains,
+        n_dim = length(x0),
+        individual_chains = results_list
+      ),
+      class = "twalk"
     ))
   }
 }
