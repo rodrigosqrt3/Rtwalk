@@ -1,4 +1,4 @@
-[![CRAN status](https://www.r-pkg.org/badges/version/Rtwalk)](https://CRAN.R-project.org/package=Rtwalk)
+[![CRAN status](https://www.r-pkg.org/badges/version/Rtwalk)](https://CRAN.R-project.org/package=Rtwalk) [![R-CMD-check](https://github.com/rodrigosqrt3/Rtwalk/actions/workflows/r.yml/badge.svg)](https://github.com/rodrigosqrt3/Rtwalk/actions/workflows/r.yml)
 
 # Rtwalk: An MCMC Sampler Using the t-walk Algorithm
 
@@ -60,3 +60,4 @@ This package is an implementation of the algorithm described in the following pa
 ## License
 
 This package is licensed under the GPL-3. See the `LICENSE` file for more details.
+
