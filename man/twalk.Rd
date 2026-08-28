@@ -4,11 +4,22 @@
 \alias{twalk}
 \title{Run the t-walk MCMC Algorithm}
 \usage{
-twalk(log_posterior, n_iter, x0, xp0, n_chains = 1, n_cores = NULL, ...)
+twalk(
+  log_posterior,
+  n_iter,
+  x0,
+  xp0,
+  n_chains = 1,
+  n_cores = NULL,
+  show_progress = TRUE,
+  ...
+)
 }
 \arguments{
 \item{log_posterior}{A function that takes a parameter vector as its
-first argument and returns the scalar log posterior density.
+first argument and returns one numeric log posterior density. It may
+return `-Inf` outside the support, but must not return vectors, `NA`,
+`NaN`, or `+Inf`.
 Additional arguments can be passed to this function via `...`.}
 
 \item{n_iter}{The number of iterations to run for each chain.}
@@ -22,15 +33,27 @@ Defaults to `1`, which runs a single chain sequentially. If greater
 than 1, parallel mode is activated.}
 
 \item{n_cores}{The number of CPU cores to use in parallel mode.
-If `NULL` (default), it will attempt to use all available cores minus one.}
+If `NULL` (default), it will attempt to use all available cores minus one.
+Parallel random-number streams are initialized from R's current random
+state, so calling `set.seed()` before `twalk()` makes results reproducible.}
+
+\item{show_progress}{Logical; whether to display progress bars and status
+messages. Defaults to `TRUE`.}
 
 \item{...}{Additional arguments to be passed to the `log_posterior` function.}
 }
 \value{
 A list containing:
-\item{all_samples}{A matrix with the combined samples from all chains.}
+\item{samples}{The primary t-walk trajectory, with `n_iter` rows per chain.}
+\item{companion_samples}{The auxiliary trajectory maintained by the t-walk.}
+\item{all_samples}{Legacy concatenation of the primary and auxiliary
+      trajectories. This is retained for compatibility and should not be
+      treated as a single time-ordered MCMC chain.}
 \item{acceptance_rate}{The average acceptance rate across all chains.}
-\item{total_iterations}{The total number of samples generated (n_iter * n_chains).}
+\item{n_iter}{The number of iterations generated per chain.}
+\item{n_chains}{The number of independent chains.}
+\item{total_iterations}{The total number of primary samples generated
+      (`n_iter * n_chains`).}
 \item{n_dim}{The dimension of the parameter space.}
 \item{individual_chains}{If `n_chains > 1`, a list containing the raw
       results from each separate chain, useful for diagnostics like R-hat.}
@@ -55,7 +78,7 @@ if (requireNamespace("mvtnorm", quietly = TRUE)) {
   result_seq <- twalk(log_posterior = log_post, n_iter = 5000,
                           x0 = c(-1, 1), xp0 = c(1, -1))
 
-  plot(result_seq$all_samples, pch = '.', main = "t-walk Samples (Sequential)")
+  plot(result_seq$samples, pch = '.', main = "t-walk Samples (Sequential)")
 }
 
 \donttest{
@@ -66,7 +89,7 @@ if (requireNamespace("mvtnorm", quietly = TRUE)) {
   result_par <- twalk(log_posterior = log_post, n_iter = 2500,
                           x0 = c(-1, 1), xp0 = c(1, -1), n_chains = 2)
 
-  plot(result_par$all_samples, pch = '.', main = "t-walk Samples (Parallel)")
+  plot(result_par$samples, pch = '.', main = "t-walk Samples (Parallel)")
 }
 }
 }

@@ -34,6 +34,27 @@ test_that("kernels and log-density helpers run without errors and cover zero-phi
   expect_true(is.numeric(ld_hop))
 })
 
+test_that("Blow log density only uses selected coordinates", {
+  x <- 0:9
+  xp <- x + 1:10
+  phi <- c(rep(TRUE, 4), rep(FALSE, 6))
+  n_phi <- sum(phi)
+  sigma <- max(phi * abs(xp - x))
+
+  h <- x
+  h[phi] <- xp[phi] + sigma * c(0.1, -0.2, 0.3, -0.4)
+
+  expected <-
+    (n_phi / 2) * log(2 * pi) +
+    n_phi * log(sigma) +
+    0.5 * sum((h[phi] - xp[phi])^2) / sigma^2
+
+  expect_equal(
+    log_density_blow(n_phi, phi, h, x, xp),
+    expected
+  )
+})
+
 test_that("twalk_move tests all 4 kernel types and both directions", {
   obj_fun <- function(p, ...) -0.5 * sum(p^2)
   supp_fun <- function(p, ...) TRUE

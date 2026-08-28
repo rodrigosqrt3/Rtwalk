@@ -26,3 +26,22 @@ test_that("visualize_results generates plots for 1D, 2D, and high-dimensional sa
     "Note: Only showing first 6 dimensions"
   )
 })
+
+test_that("visualize_results uses shared sample and burn-in validation", {
+  pdf(file = tempfile())
+  on.exit(dev.off())
+
+  samples <- matrix(rnorm(200), ncol = 2)
+
+  for (burnin in c(-0.1, 1, 1.2, NA_real_)) {
+    expect_error(
+      visualize_results(samples, burnin_frac = burnin),
+      "`burnin_frac` must be one finite number in \\[0, 1\\)"
+    )
+  }
+
+  expect_error(
+    visualize_results(list(samples, samples)),
+    "one chain at a time"
+  )
+})

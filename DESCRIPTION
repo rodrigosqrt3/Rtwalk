@@ -16,6 +16,7 @@ Encoding: UTF-8
 RoxygenNote: 7.3.3
 Config/testthat/edition: 3
 Imports:
+    codetools,
     parallel,
     stats,
     utils,

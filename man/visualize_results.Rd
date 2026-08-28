@@ -34,7 +34,7 @@ depending on the dimension of the parameter space.
 log_post <- function(x) dnorm(x, log = TRUE)
 res <- twalk(log_post, n_iter = 2000, x0 = -2, xp0 = 2)
 visualize_results(
-  res$all_samples,
+  res$samples,
   true_values = 0,
   title = "Standard normal"
 )

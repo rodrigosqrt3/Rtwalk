@@ -12,8 +12,9 @@ NULL
 #' @export
 print.twalk <- function(x, ...) {
   cat("t-walk MCMC output\n")
-  cat("Iterations:", nrow(x$all_samples), "\n")
-  cat("Dimension:", ncol(x$all_samples), "\n")
+  iterations <- if (!is.null(x$n_iter)) x$n_iter else nrow(x$samples)
+  cat("Iterations per chain:", iterations, "\n")
+  cat("Dimension:", ncol(x$samples), "\n")
   invisible(x)
 }
 
@@ -21,8 +22,15 @@ print.twalk <- function(x, ...) {
 #' @method summary twalk
 #' @export
 summary.twalk <- function(object, burnin_frac = 0.2, ...) {
+  samples <- if (!is.null(object$individual_chains) &&
+                 length(object$individual_chains) > 1L) {
+    lapply(object$individual_chains, function(chain) chain$samples)
+  } else {
+    object$samples
+  }
+
   calculate_diagnostics(
-    object$all_samples,
+    samples,
     burnin_frac = burnin_frac
   )
 }

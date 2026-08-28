@@ -12,7 +12,9 @@ calculate_diagnostics(
 )
 }
 \arguments{
-\item{samples}{Matrix of MCMC samples (iterations x parameters).}
+\item{samples}{A matrix of MCMC samples (iterations x parameters), or a
+list of matrices for multiple independent chains. For a list, burn-in is
+discarded separately from each chain.}
 
 \item{burnin_frac}{Fraction of samples to discard as burn-in.}
 
@@ -31,7 +33,7 @@ effective sample sizes after discarding a burn-in fraction.
 log_post <- function(x) dnorm(x, log = TRUE)
 res <- twalk(log_post, n_iter = 2000, x0 = -2, xp0 = 2)
 calculate_diagnostics(
-  res$all_samples,
+  res$samples,
   burnin_frac = 0.2,
   param_names = "theta",
   title = "Standard normal"

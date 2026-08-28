@@ -78,7 +78,10 @@ log_density_blow <- function(n_phi, phi, h, x, xp) {
   if (sigma < .Machine$double.eps) sigma <- .Machine$double.eps
 
   if (n_phi > 0) {
-    diff_vec <- h - xp
+    # The continuous part of the Blow proposal is defined only on the
+    # coordinates selected by phi. The remaining coordinates are point masses
+    # at x and must not contribute to the Gaussian density.
+    diff_vec <- h[phi] - xp[phi]
     (n_phi / 2) * log(2 * pi) + n_phi * log(sigma) + 0.5 * sum(diff_vec^2) / (sigma^2)
   } else {
     0
@@ -132,9 +135,9 @@ log_density_hop <- function(n_phi, phi, h, x, xp) {
 #' @return A list containing the proposal and the acceptance probability.
 #' @keywords internal
 twalk_move <- function(n_dim, log_post_fun, support_fun, x, U, xp, Up,
-                           at = 6.0, aw = 1.5,
-                           p_phi = min(n_dim, 4) / n_dim,
-                           p_traverse = 0.4918, p_walk = 0.4918, p_blow = 0.0082, ...) {
+                       at = 6.0, aw = 1.5,
+                       p_phi = min(n_dim, 4) / n_dim,
+                       p_traverse = 0.4918, p_walk = 0.4918, p_blow = 0.0082, ...) {
 
   # Kernel selection probabilities
   p_hop <- 1 - p_traverse - p_walk - p_blow

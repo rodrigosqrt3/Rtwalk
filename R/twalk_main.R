@@ -6,7 +6,9 @@
 #' to accelerate execution and facilitate convergence diagnostics.
 #'
 #' @param log_posterior A function that takes a parameter vector as its
-#'   first argument and returns the scalar log posterior density.
+#'   first argument and returns one numeric log posterior density. It may
+#'   return `-Inf` outside the support, but must not return vectors, `NA`,
+#'   `NaN`, or `+Inf`.
 #'   Additional arguments can be passed to this function via `...`.
 #' @param n_iter The number of iterations to run for each chain.
 #' @param x0 A numeric vector with the initial values for the first point (`x`).
@@ -16,18 +18,29 @@
 #'   than 1, parallel mode is activated.
 #' @param n_cores The number of CPU cores to use in parallel mode.
 #'   If `NULL` (default), it will attempt to use all available cores minus one.
+#'   Parallel random-number streams are initialized from R's current random
+#'   state, so calling `set.seed()` before `twalk()` makes results reproducible.
+#' @param show_progress Logical; whether to display progress bars and status
+#'   messages. Defaults to `TRUE`.
 #' @param ... Additional arguments to be passed to the `log_posterior` function.
 #'
 #' @return A list containing:
-#' \item{all_samples}{A matrix with the combined samples from all chains.}
+#' \item{samples}{The primary t-walk trajectory, with `n_iter` rows per chain.}
+#' \item{companion_samples}{The auxiliary trajectory maintained by the t-walk.}
+#' \item{all_samples}{Legacy concatenation of the primary and auxiliary
+#'       trajectories. This is retained for compatibility and should not be
+#'       treated as a single time-ordered MCMC chain.}
 #' \item{acceptance_rate}{The average acceptance rate across all chains.}
-#' \item{total_iterations}{The total number of samples generated (n_iter * n_chains).}
+#' \item{n_iter}{The number of iterations generated per chain.}
+#' \item{n_chains}{The number of independent chains.}
+#' \item{total_iterations}{The total number of primary samples generated
+#'       (`n_iter * n_chains`).}
 #' \item{n_dim}{The dimension of the parameter space.}
 #' \item{individual_chains}{If `n_chains > 1`, a list containing the raw
 #'       results from each separate chain, useful for diagnostics like R-hat.}
 #'
 #' @export
-#' @importFrom parallel detectCores makeCluster clusterEvalQ clusterExport parLapply stopCluster
+#' @importFrom parallel detectCores makeCluster clusterEvalQ clusterExport clusterSetRNGStream parLapply stopCluster
 #' @importFrom stats rnorm runif
 #' @importFrom utils txtProgressBar setTxtProgressBar
 #'
@@ -45,7 +58,7 @@
 #'   result_seq <- twalk(log_posterior = log_post, n_iter = 5000,
 #'                           x0 = c(-1, 1), xp0 = c(1, -1))
 #'
-#'   plot(result_seq$all_samples, pch = '.', main = "t-walk Samples (Sequential)")
+#'   plot(result_seq$samples, pch = '.', main = "t-walk Samples (Sequential)")
 #' }
 #'
 #' \donttest{
@@ -56,44 +69,93 @@
 #'   result_par <- twalk(log_posterior = log_post, n_iter = 2500,
 #'                           x0 = c(-1, 1), xp0 = c(1, -1), n_chains = 2)
 #'
-#'   plot(result_par$all_samples, pch = '.', main = "t-walk Samples (Parallel)")
+#'   plot(result_par$samples, pch = '.', main = "t-walk Samples (Parallel)")
 #' }
 #' }
 twalk <- function(log_posterior, n_iter, x0, xp0,
-                  n_chains = 1, n_cores = NULL, ...) {
+                  n_chains = 1, n_cores = NULL, show_progress = TRUE, ...) {
+
+  is_positive_integer <- function(x) {
+    is.numeric(x) && length(x) == 1L && !is.na(x) && is.finite(x) &&
+      x >= 1 && x == floor(x) && x <= .Machine$integer.max
+  }
+
+  if (!is.function(log_posterior)) {
+    stop("`log_posterior` must be a function.", call. = FALSE)
+  }
+
+  if (!is_positive_integer(n_iter)) {
+    stop("`n_iter` must be a positive integer.", call. = FALSE)
+  }
+
+  if (!is_positive_integer(n_chains)) {
+    stop("`n_chains` must be a positive integer.", call. = FALSE)
+  }
+
+  if (!is.null(n_cores) && !is_positive_integer(n_cores)) {
+    stop("`n_cores` must be NULL or a positive integer.", call. = FALSE)
+  }
+
+  if (!is.logical(show_progress) || length(show_progress) != 1L || is.na(show_progress)) {
+    stop("`show_progress` must be TRUE or FALSE.", call. = FALSE)
+  }
+
+  valid_initial_point <- function(x) {
+    is.numeric(x) && is.null(dim(x)) && length(x) > 0L && all(is.finite(x))
+  }
+
+  if (!valid_initial_point(x0) || !valid_initial_point(xp0)) {
+    stop("`x0` and `xp0` must be non-empty numeric vectors with finite values.", call. = FALSE)
+  }
+
+  if (length(x0) != length(xp0)) {
+    stop("`x0` and `xp0` must have the same length.", call. = FALSE)
+  }
+
+  n_iter <- as.integer(n_iter)
+  n_chains <- as.integer(n_chains)
+  if (!is.null(n_cores)) {
+    n_cores <- as.integer(n_cores)
+  }
 
   # Capture all extra arguments in a list
   extra_args <- list(...)
 
   # --- SEQUENTIAL BLOCK ---
   if (n_chains == 1) {
-
-    is_internal_call <- "internal_call" %in% names(extra_args)
-
-    if (!is_internal_call) {
+    if (show_progress) {
       message("--- Running t-walk in sequential mode (1 chain) ---")
     }
 
     n_dim <- length(x0)
 
-    # Create a clean copy of extra arguments for internal use,
-    # removing the 'internal_call' flag.
     internal_args <- extra_args
-    if (is_internal_call) {
-      internal_args$internal_call <- NULL
+
+    evaluate_log_posterior <- function(params) {
+      res <- tryCatch(
+        do.call(log_posterior, c(list(params), internal_args)),
+        error = function(e) -Inf
+      )
+
+      if (!is.numeric(res) || length(res) != 1L) {
+        stop("`log_posterior` must return a single numeric value.", call. = FALSE)
+      }
+
+      if (is.na(res) || is.nan(res) || (is.infinite(res) && res > 0)) {
+        stop("`log_posterior` must return a finite value or -Inf outside the support.", call. = FALSE)
+      }
+
+      res
     }
 
     # Wrapper for the objective function (-log_posterior)
     objective_fun <- function(params, ...) {
-      res <- tryCatch(-do.call(log_posterior, c(list(params), internal_args)), error = function(e) Inf)
-      if (length(res) != 1) return(Inf)
-      return(res)
+      -evaluate_log_posterior(params)
     }
 
     # Wrapper for the support function
     support_fun <- function(params, ...) {
-      res <- tryCatch(do.call(log_posterior, c(list(params), internal_args)), error = function(e) -Inf)
-      return(all(is.finite(res)))
+      is.finite(evaluate_log_posterior(params))
     }
 
     if (!support_fun(x0) || !support_fun(xp0)) {
@@ -107,17 +169,21 @@ twalk <- function(log_posterior, n_iter, x0, xp0,
     xp_samples <- matrix(NA, nrow = n_iter, ncol = n_dim)
     accepted_count <- 0
 
-    use_progress_bar <- !is_internal_call
+    use_progress_bar <- show_progress
     if (use_progress_bar) {
       progress_bar <- utils::txtProgressBar(min = 0, max = n_iter, style = 3, width = 50, char = "=")
     }
 
     for (i in 1:n_iter) {
-      move <- do.call(twalk_move, c(
-        list(n_dim = n_dim, log_post_fun = objective_fun, support_fun = support_fun,
-             x = x_current, U = U, xp = xp_current, Up = Up),
-        internal_args
-      ))
+      move <- twalk_move(
+        n_dim = n_dim,
+        log_post_fun = objective_fun,
+        support_fun = support_fun,
+        x = x_current,
+        U = U,
+        xp = xp_current,
+        Up = Up
+      )
 
       if (stats::runif(1) < move$alpha) {
         x_current <- move$y
@@ -144,9 +210,13 @@ twalk <- function(log_posterior, n_iter, x0, xp0,
 
     return(structure(
       list(
+        samples = x_samples,
+        companion_samples = xp_samples,
         all_samples = rbind(x_samples, xp_samples),
         acceptance_rate = acceptance_rate,
         n_iter = n_iter,
+        n_chains = 1L,
+        total_iterations = n_iter,
         n_dim = n_dim
       ),
       class = "twalk"
@@ -157,17 +227,68 @@ twalk <- function(log_posterior, n_iter, x0, xp0,
   else {
 
     if (is.null(n_cores)) {
-      n_cores <- max(1, parallel::detectCores() - 1)
+      detected_cores <- parallel::detectCores()
+      if (is.na(detected_cores)) {
+        detected_cores <- 1L
+      }
+      n_cores <- max(1L, detected_cores - 1L)
     }
     n_cores_used <- min(n_chains, n_cores)
 
-    message(sprintf("--- Running t-walk in PARALLEL mode (%d chains on %d cores) ---", n_chains, n_cores_used))
+    if (show_progress) {
+      message(sprintf("--- Running t-walk in PARALLEL mode (%d chains on %d cores) ---", n_chains, n_cores_used))
+    }
 
     cl <- parallel::makeCluster(n_cores_used)
     on.exit(parallel::stopCluster(cl))
 
+    # Derive reproducible, independent worker streams from the RNG state in the
+    # main R process. This respects set.seed() without resetting the user's RNG.
+    parallel_seed <- sample.int(.Machine$integer.max, 1)
+    parallel::clusterSetRNGStream(cl, iseed = parallel_seed)
+
     # Export the log_posterior function and extra_args to cluster workers
     parallel::clusterExport(cl, varlist = c("log_posterior", "extra_args", "x0", "xp0", "n_iter"), envir = environment())
+
+    # Functions created in the global or a local environment may refer to data
+    # and helper functions stored alongside them. PSOCK workers start with a
+    # clean workspace, so recursively collect and export those dependencies.
+    collect_dependencies <- function(fun, collected = list()) {
+      fun_env <- environment(fun)
+      if (is.null(fun_env)) {
+        return(collected)
+      }
+
+      global_names <- codetools::findGlobals(fun, merge = TRUE)
+      local_names <- global_names[vapply(
+        global_names,
+        exists,
+        logical(1),
+        envir = fun_env,
+        inherits = FALSE
+      )]
+
+      for (name in setdiff(local_names, names(collected))) {
+        object <- get(name, envir = fun_env, inherits = FALSE)
+        collected[[name]] <- object
+
+        if (is.function(object)) {
+          collected <- collect_dependencies(object, collected)
+        }
+      }
+
+      collected
+    }
+
+    dependencies <- collect_dependencies(log_posterior)
+    if (length(dependencies) > 0L) {
+      dependency_env <- list2env(dependencies, parent = emptyenv())
+      parallel::clusterExport(
+        cl,
+        varlist = names(dependencies),
+        envir = dependency_env
+      )
+    }
 
     # Load required packages on each worker node
     parallel::clusterEvalQ(cl, {
@@ -177,37 +298,41 @@ twalk <- function(log_posterior, n_iter, x0, xp0,
 
     # This is the function that will be executed on each worker node
     run_single_chain <- function(chain_index) {
-      # Set a different seed for each chain to ensure independence
-      set.seed(as.integer(Sys.time()) + chain_index)
-
-      n_dim <- length(x0)
-      # Jitter initial points slightly for each chain
-      x0_i <- stats::rnorm(n_dim, mean = x0, sd = 0.1)
-      xp0_i <- stats::rnorm(n_dim, mean = xp0, sd = 0.1)
-
       # Use 'do.call' to safely construct the function call,
       # passing the extra arguments (...) correctly.
       chain_result <- do.call(twalk, c(
-        list(log_posterior = log_posterior, n_iter = n_iter, x0 = x0_i, xp0 = xp0_i,
-             n_chains = 1, internal_call = TRUE),
+        list(log_posterior = log_posterior, n_iter = n_iter, x0 = x0, xp0 = xp0,
+             n_chains = 1, show_progress = FALSE),
         extra_args
       ))
       return(chain_result)
     }
 
-    message("Distributing work among cores...")
+    if (show_progress) {
+      message("Distributing work among cores...")
+    }
     results_list <- parallel::parLapply(cl, 1:n_chains, run_single_chain)
 
-    message("Chains completed. Combining results...")
+    if (show_progress) {
+      message("Chains completed. Combining results...")
+    }
 
+    combined_primary_samples <- do.call(rbind, lapply(results_list, function(res) res$samples))
+    combined_companion_samples <- do.call(rbind, lapply(results_list, function(res) res$companion_samples))
     combined_samples <- do.call(rbind, lapply(results_list, function(res) res$all_samples))
     mean_acceptance_rate <- mean(sapply(results_list, function(res) res$acceptance_rate))
-    message(sprintf("\nMean acceptance rate across chains: %.2f%%", mean_acceptance_rate * 100))
+    if (show_progress) {
+      message(sprintf("\nMean acceptance rate across chains: %.2f%%", mean_acceptance_rate * 100))
+    }
 
     return(structure(
       list(
+        samples = combined_primary_samples,
+        companion_samples = combined_companion_samples,
         all_samples = combined_samples,
         acceptance_rate = mean_acceptance_rate,
+        n_iter = n_iter,
+        n_chains = n_chains,
         total_iterations = n_iter * n_chains,
         n_dim = length(x0),
         individual_chains = results_list

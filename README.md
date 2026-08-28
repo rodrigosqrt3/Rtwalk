@@ -1,4 +1,4 @@
-[![CRAN status](https://www.r-pkg.org/badges/version/Rtwalk)](https://CRAN.R-project.org/package=Rtwalk) [![R-CMD-check](https://github.com/rodrigosqrt3/Rtwalk/actions/workflows/r.yml/badge.svg)](https://github.com/rodrigosqrt3/Rtwalk/actions/workflows/r.yml) [![Codecov test coverage](https://codecov.io/gh/rodrigosqrt3/Rtwalk/branch/main/graph/badge.svg)](https://app.codecov.io/gh/rodrigosqrt3/Rtwalk)
+[![CRAN status](https://www.r-pkg.org/badges/version/Rtwalk)](https://CRAN.R-project.org/package=Rtwalk) [![R-CMD-check](https://github.com/rodrigosqrt3/Rtwalk/actions/workflows/r.yml/badge.svg)](https://github.com/rodrigosqrt3/Rtwalk/actions/workflows/r.yml)
 
 # Rtwalk: An MCMC Sampler Using the t-walk Algorithm
 
@@ -39,8 +39,8 @@ result <- twalk(
   xp0 = initial_point_2
 )
 
-burnin <- nrow(result$all_samples) * 0.2
-samples <- result$all_samples[-(1:burnin), ]
+burnin <- nrow(result$samples) * 0.2
+samples <- result$samples[-(1:burnin), , drop = FALSE]
 
 par(mfrow = c(1, 2))
 hist(samples, breaks = 50, freq = FALSE, 
@@ -60,4 +60,5 @@ This package is an implementation of the algorithm described in the following pa
 ## License
 
 This package is licensed under the GPL-3. See the `LICENSE` file for more details.
+
 
