@@ -49,7 +49,13 @@ A list containing:
 \item{all_samples}{Legacy concatenation of the primary and auxiliary
       trajectories. This is retained for compatibility and should not be
       treated as a single time-ordered MCMC chain.}
-\item{acceptance_rate}{The average acceptance rate across all chains.}
+\item{acceptance_rate}{The average Metropolis--Hastings acceptance rate
+      across all chains. Accepted identity proposals are included, as
+      required by the t-walk transition kernel.}
+\item{move_rate}{The proportion of iterations in which an accepted
+      proposal actually changed at least one of the two t-walk points.}
+\item{no_move_rate}{The proportion of iterations containing an accepted
+      identity proposal. It equals `acceptance_rate - move_rate`.}
 \item{n_iter}{The number of iterations generated per chain.}
 \item{n_chains}{The number of independent chains.}
 \item{total_iterations}{The total number of primary samples generated

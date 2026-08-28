@@ -16,6 +16,20 @@ simulate_beta <- function(at = 6.0) {
   }
 }
 
+# Convert a log Metropolis--Hastings ratio to the acceptance probability
+# min(1, exp(log_ratio)) without overflowing for large positive ratios.
+acceptance_probability <- function(log_ratio) {
+  if (!is.numeric(log_ratio) || length(log_ratio) != 1L || is.na(log_ratio)) {
+    return(0.0)
+  }
+
+  if (log_ratio >= 0) {
+    return(1.0)
+  }
+
+  exp(log_ratio)
+}
+
 #' Generate a proposal for the Traverse kernel
 #' @param n_dim Dimension of the parameter space.
 #' @param p_phi Probability of updating each coordinate.
@@ -155,13 +169,27 @@ twalk_move <- function(n_dim, log_post_fun, support_fun, x, U, xp, Up,
       res <- kernel_traverse(n_dim, p_phi, xp, x, beta)
       yp <- res$proposal; n_phi <- res$n_phi; y <- x; prop_U <- U
       if (support_fun(yp, ...)) {
-        prop_Up <- log_post_fun(yp, ...); if (n_phi == 0) alpha <- 1 else alpha <- exp((U - prop_U) + (Up - prop_Up) + (n_phi - 2) * log(beta))
+        prop_Up <- log_post_fun(yp, ...)
+        if (n_phi == 0) {
+          alpha <- 1
+        } else {
+          log_alpha <- (U - prop_U) + (Up - prop_Up) +
+            (n_phi - 2) * log(beta)
+          alpha <- acceptance_probability(log_alpha)
+        }
       }
     } else {
       res <- kernel_traverse(n_dim, p_phi, x, xp, beta)
       y <- res$proposal; n_phi <- res$n_phi; yp <- xp; prop_Up <- Up
       if (support_fun(y, ...)) {
-        prop_U <- log_post_fun(y, ...); if (n_phi == 0) alpha <- 1 else alpha <- exp((U - prop_U) + (Up - prop_Up) + (n_phi - 2) * log(beta))
+        prop_U <- log_post_fun(y, ...)
+        if (n_phi == 0) {
+          alpha <- 1
+        } else {
+          log_alpha <- (U - prop_U) + (Up - prop_Up) +
+            (n_phi - 2) * log(beta)
+          alpha <- acceptance_probability(log_alpha)
+        }
       }
     }
   } else if (kernel_choice == 2) { # Walk Kernel
@@ -169,13 +197,17 @@ twalk_move <- function(n_dim, log_post_fun, support_fun, x, U, xp, Up,
       res <- kernel_walk(n_dim, p_phi, aw, xp, x)
       yp <- res$proposal; y <- x; prop_U <- U
       if (support_fun(yp, ...) && any(yp != y)) {
-        prop_Up <- log_post_fun(yp, ...); alpha <- exp((U - prop_U) + (Up - prop_Up))
+        prop_Up <- log_post_fun(yp, ...)
+        log_alpha <- (U - prop_U) + (Up - prop_Up)
+        alpha <- acceptance_probability(log_alpha)
       }
     } else {
       res <- kernel_walk(n_dim, p_phi, aw, x, xp)
       y <- res$proposal; yp <- xp; prop_Up <- Up
       if (support_fun(y, ...) && any(y != yp)) {
-        prop_U <- log_post_fun(y, ...); alpha <- exp((U - prop_U) + (Up - prop_Up))
+        prop_U <- log_post_fun(y, ...)
+        log_alpha <- (U - prop_U) + (Up - prop_Up)
+        alpha <- acceptance_probability(log_alpha)
       }
     }
   } else if (kernel_choice == 3) { # Blow Kernel
@@ -183,13 +215,21 @@ twalk_move <- function(n_dim, log_post_fun, support_fun, x, U, xp, Up,
       res <- kernel_blow(n_dim, p_phi, xp, x)
       yp <- res$proposal; n_phi <- res$n_phi; phi <- res$phi; y <- x; prop_U <- U
       if (support_fun(yp, ...) && any(yp != x)) {
-        prop_Up <- log_post_fun(yp, ...); W1 <- log_density_blow(n_phi, phi, yp, xp, x); W2 <- log_density_blow(n_phi, phi, xp, yp, x); alpha <- exp((U - prop_U) + (Up - prop_Up) + (W1 - W2))
+        prop_Up <- log_post_fun(yp, ...)
+        W1 <- log_density_blow(n_phi, phi, yp, xp, x)
+        W2 <- log_density_blow(n_phi, phi, xp, yp, x)
+        log_alpha <- (U - prop_U) + (Up - prop_Up) + (W1 - W2)
+        alpha <- acceptance_probability(log_alpha)
       }
     } else {
       res <- kernel_blow(n_dim, p_phi, x, xp)
       y <- res$proposal; n_phi <- res$n_phi; phi <- res$phi; yp <- xp; prop_Up <- Up
       if (support_fun(y, ...) && any(y != xp)) {
-        prop_U <- log_post_fun(y, ...); W1 <- log_density_blow(n_phi, phi, y, x, xp); W2 <- log_density_blow(n_phi, phi, x, y, xp); alpha <- exp((U - prop_U) + (Up - prop_Up) + (W1 - W2))
+        prop_U <- log_post_fun(y, ...)
+        W1 <- log_density_blow(n_phi, phi, y, x, xp)
+        W2 <- log_density_blow(n_phi, phi, x, y, xp)
+        log_alpha <- (U - prop_U) + (Up - prop_Up) + (W1 - W2)
+        alpha <- acceptance_probability(log_alpha)
       }
     }
   } else { # Hop Kernel
@@ -197,18 +237,24 @@ twalk_move <- function(n_dim, log_post_fun, support_fun, x, U, xp, Up,
       res <- kernel_hop(n_dim, p_phi, xp, x)
       yp <- res$proposal; n_phi <- res$n_phi; phi <- res$phi; y <- x; prop_U <- U
       if (support_fun(yp, ...) && any(yp != x)) {
-        prop_Up <- log_post_fun(yp, ...); W1 <- log_density_hop(n_phi, phi, yp, xp, x); W2 <- log_density_hop(n_phi, phi, xp, yp, x); alpha <- exp((U - prop_U) + (Up - prop_Up) + (W1 - W2))
+        prop_Up <- log_post_fun(yp, ...)
+        W1 <- log_density_hop(n_phi, phi, yp, xp, x)
+        W2 <- log_density_hop(n_phi, phi, xp, yp, x)
+        log_alpha <- (U - prop_U) + (Up - prop_Up) + (W1 - W2)
+        alpha <- acceptance_probability(log_alpha)
       }
     } else {
       res <- kernel_hop(n_dim, p_phi, x, xp)
       y <- res$proposal; n_phi <- res$n_phi; phi <- res$phi; yp <- xp; prop_Up <- Up
       if (support_fun(y, ...) && any(y != xp)) {
-        prop_U <- log_post_fun(y, ...); W1 <- log_density_hop(n_phi, phi, y, x, xp); W2 <- log_density_hop(n_phi, phi, x, y, xp); alpha <- exp((U - prop_U) + (Up - prop_Up) + (W1 - W2))
+        prop_U <- log_post_fun(y, ...)
+        W1 <- log_density_hop(n_phi, phi, y, x, xp)
+        W2 <- log_density_hop(n_phi, phi, x, y, xp)
+        log_alpha <- (U - prop_U) + (Up - prop_Up) + (W1 - W2)
+        alpha <- acceptance_probability(log_alpha)
       }
     }
   }
-
-  if (is.nan(alpha)) { alpha <- 0.0 }
 
   list(y = y, prop_U = prop_U, yp = yp, prop_Up = prop_Up, alpha = alpha)
 }

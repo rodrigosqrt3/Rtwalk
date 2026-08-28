@@ -15,6 +15,8 @@ test_that("twalk runs in sequential mode correctly", {
   expect_equal(res$all_samples[1:100, ], res$samples)
   expect_equal(res$all_samples[101:200, ], res$companion_samples)
   expect_true(res$acceptance_rate >= 0 && res$acceptance_rate <= 1)
+  expect_true(res$move_rate >= 0 && res$move_rate <= res$acceptance_rate)
+  expect_equal(res$no_move_rate, res$acceptance_rate - res$move_rate)
 })
 
 test_that("twalk can suppress progress output", {
@@ -104,6 +106,13 @@ test_that("twalk runs in parallel mode correctly", {
   expect_equal(nrow(res_par$all_samples), 200)
   expect_length(res_par$individual_chains, 2)
   expect_true(res_par$acceptance_rate >= 0 && res_par$acceptance_rate <= 1)
+  expect_true(res_par$move_rate >= 0 && res_par$move_rate <= res_par$acceptance_rate)
+  expect_equal(res_par$no_move_rate, res_par$acceptance_rate - res_par$move_rate)
+  expect_true(all(vapply(
+    res_par$individual_chains,
+    function(chain) !is.null(chain$move_rate) && !is.null(chain$no_move_rate),
+    logical(1)
+  )))
 })
 
 test_that("twalk parallel mode automatically detects cores when n_cores is NULL", {
@@ -144,6 +153,8 @@ test_that("parallel mode respects set.seed", {
   expect_identical(first$samples, second$samples)
   expect_identical(first$companion_samples, second$companion_samples)
   expect_identical(first$acceptance_rate, second$acceptance_rate)
+  expect_identical(first$move_rate, second$move_rate)
+  expect_identical(first$no_move_rate, second$no_move_rate)
 })
 
 test_that("parallel mode preserves valid initial points inside constrained support", {
@@ -332,4 +343,24 @@ test_that("internal_call is passed through to log_posterior", {
 
   expect_identical(with_argument$samples, with_closure$samples)
   expect_identical(with_argument$companion_samples, with_closure$companion_samples)
+})
+
+test_that("log_posterior is evaluated once per proposal", {
+  evaluations <- 0L
+  log_counted <- function(x) {
+    evaluations <<- evaluations + 1L
+    -0.5 * sum(x^2)
+  }
+
+  set.seed(123)
+  result <- twalk(
+    log_counted,
+    n_iter = 100,
+    x0 = c(-1, 1),
+    xp0 = c(1, -1),
+    show_progress = FALSE
+  )
+
+  expect_s3_class(result, "twalk")
+  expect_equal(evaluations, result$n_iter + 2L)
 })

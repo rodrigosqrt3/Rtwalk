@@ -30,7 +30,13 @@
 #' \item{all_samples}{Legacy concatenation of the primary and auxiliary
 #'       trajectories. This is retained for compatibility and should not be
 #'       treated as a single time-ordered MCMC chain.}
-#' \item{acceptance_rate}{The average acceptance rate across all chains.}
+#' \item{acceptance_rate}{The average Metropolis--Hastings acceptance rate
+#'       across all chains. Accepted identity proposals are included, as
+#'       required by the t-walk transition kernel.}
+#' \item{move_rate}{The proportion of iterations in which an accepted
+#'       proposal actually changed at least one of the two t-walk points.}
+#' \item{no_move_rate}{The proportion of iterations containing an accepted
+#'       identity proposal. It equals `acceptance_rate - move_rate`.}
 #' \item{n_iter}{The number of iterations generated per chain.}
 #' \item{n_chains}{The number of independent chains.}
 #' \item{total_iterations}{The total number of primary samples generated
@@ -131,7 +137,15 @@ twalk <- function(log_posterior, n_iter, x0, xp0,
 
     internal_args <- extra_args
 
+    evaluation_cache <- new.env(parent = emptyenv())
+    evaluation_cache$has_value <- FALSE
+
     evaluate_log_posterior <- function(params) {
+      if (evaluation_cache$has_value &&
+          identical(params, evaluation_cache$params)) {
+        return(evaluation_cache$value)
+      }
+
       res <- tryCatch(
         do.call(log_posterior, c(list(params), internal_args)),
         error = function(e) -Inf
@@ -144,6 +158,10 @@ twalk <- function(log_posterior, n_iter, x0, xp0,
       if (is.na(res) || is.nan(res) || (is.infinite(res) && res > 0)) {
         stop("`log_posterior` must return a finite value or -Inf outside the support.", call. = FALSE)
       }
+
+      evaluation_cache$params <- params
+      evaluation_cache$value <- res
+      evaluation_cache$has_value <- TRUE
 
       res
     }
@@ -158,16 +176,21 @@ twalk <- function(log_posterior, n_iter, x0, xp0,
       is.finite(evaluate_log_posterior(params))
     }
 
-    if (!support_fun(x0) || !support_fun(xp0)) {
+    initial_log_x <- evaluate_log_posterior(x0)
+    initial_log_xp <- evaluate_log_posterior(xp0)
+
+    if (!is.finite(initial_log_x) || !is.finite(initial_log_xp)) {
       stop("Initial points are outside the support (log-posterior is -Inf or returns an error).")
     }
 
-    U <- objective_fun(x0); Up <- objective_fun(xp0)
+    U <- -initial_log_x
+    Up <- -initial_log_xp
     x_current <- x0; xp_current <- xp0
 
     x_samples <- matrix(NA, nrow = n_iter, ncol = n_dim)
     xp_samples <- matrix(NA, nrow = n_iter, ncol = n_dim)
-    accepted_count <- 0
+    accepted_count <- 0L
+    moved_count <- 0L
 
     use_progress_bar <- show_progress
     if (use_progress_bar) {
@@ -186,11 +209,17 @@ twalk <- function(log_posterior, n_iter, x0, xp0,
       )
 
       if (stats::runif(1) < move$alpha) {
+        state_changed <- any(move$y != x_current) ||
+          any(move$yp != xp_current)
+
         x_current <- move$y
         U <- move$prop_U
         xp_current <- move$yp
         Up <- move$prop_Up
-        accepted_count <- accepted_count + 1
+        accepted_count <- accepted_count + 1L
+        if (state_changed) {
+          moved_count <- moved_count + 1L
+        }
       }
 
       x_samples[i, ] <- x_current
@@ -204,8 +233,11 @@ twalk <- function(log_posterior, n_iter, x0, xp0,
     }
 
     acceptance_rate <- accepted_count / n_iter
+    move_rate <- moved_count / n_iter
+    no_move_rate <- (accepted_count - moved_count) / n_iter
     if (use_progress_bar) {
       message(sprintf("\nAcceptance rate: %.2f%%", acceptance_rate * 100))
+      message(sprintf("Actual move rate: %.2f%%", move_rate * 100))
     }
 
     return(structure(
@@ -214,6 +246,8 @@ twalk <- function(log_posterior, n_iter, x0, xp0,
         companion_samples = xp_samples,
         all_samples = rbind(x_samples, xp_samples),
         acceptance_rate = acceptance_rate,
+        move_rate = move_rate,
+        no_move_rate = no_move_rate,
         n_iter = n_iter,
         n_chains = 1L,
         total_iterations = n_iter,
@@ -320,9 +354,46 @@ twalk <- function(log_posterior, n_iter, x0, xp0,
     combined_primary_samples <- do.call(rbind, lapply(results_list, function(res) res$samples))
     combined_companion_samples <- do.call(rbind, lapply(results_list, function(res) res$companion_samples))
     combined_samples <- do.call(rbind, lapply(results_list, function(res) res$all_samples))
-    mean_acceptance_rate <- mean(sapply(results_list, function(res) res$acceptance_rate))
+    chain_acceptance_rates <- vapply(
+      results_list,
+      function(res) res$acceptance_rate,
+      numeric(1)
+    )
+    mean_acceptance_rate <- mean(chain_acceptance_rates)
+
+    # Derive actual movements from the returned trajectories instead of
+    # relying on additional fields in the worker result. Besides being an
+    # independent consistency check, this also keeps PSOCK execution robust
+    # when a development version is tested against an older installed build.
+    chain_move_rates <- vapply(results_list, function(res) {
+      previous_primary <- rbind(
+        x0,
+        res$samples[-nrow(res$samples), , drop = FALSE]
+      )
+      previous_companion <- rbind(
+        xp0,
+        res$companion_samples[-nrow(res$companion_samples), , drop = FALSE]
+      )
+
+      primary_changed <- rowSums(res$samples != previous_primary) > 0L
+      companion_changed <- rowSums(
+        res$companion_samples != previous_companion
+      ) > 0L
+
+      mean(primary_changed | companion_changed)
+    }, numeric(1))
+
+    for (chain_index in seq_along(results_list)) {
+      results_list[[chain_index]]$move_rate <- chain_move_rates[[chain_index]]
+      results_list[[chain_index]]$no_move_rate <-
+        chain_acceptance_rates[[chain_index]] - chain_move_rates[[chain_index]]
+    }
+
+    mean_move_rate <- mean(chain_move_rates)
+    mean_no_move_rate <- mean_acceptance_rate - mean_move_rate
     if (show_progress) {
       message(sprintf("\nMean acceptance rate across chains: %.2f%%", mean_acceptance_rate * 100))
+      message(sprintf("Mean actual move rate across chains: %.2f%%", mean_move_rate * 100))
     }
 
     return(structure(
@@ -331,6 +402,8 @@ twalk <- function(log_posterior, n_iter, x0, xp0,
         companion_samples = combined_companion_samples,
         all_samples = combined_samples,
         acceptance_rate = mean_acceptance_rate,
+        move_rate = mean_move_rate,
+        no_move_rate = mean_no_move_rate,
         n_iter = n_iter,
         n_chains = n_chains,
         total_iterations = n_iter * n_chains,

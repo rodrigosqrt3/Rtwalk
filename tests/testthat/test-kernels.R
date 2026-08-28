@@ -9,6 +9,15 @@ test_that("simulate_beta covers both branch probabilities", {
   expect_true(length(betas) == 100)
 })
 
+test_that("acceptance probabilities are stable and bounded", {
+  expect_equal(acceptance_probability(log(0.25)), 0.25)
+  expect_equal(acceptance_probability(0), 1)
+  expect_equal(acceptance_probability(log(2)), 1)
+  expect_equal(acceptance_probability(1000), 1)
+  expect_equal(acceptance_probability(-Inf), 0)
+  expect_equal(acceptance_probability(NaN), 0)
+})
+
 test_that("kernels and log-density helpers run without errors and cover zero-phi/small sigma branches", {
   x <- c(1, 2)
   xp <- c(1, 2)
@@ -74,6 +83,13 @@ test_that("twalk_move tests all 4 kernel types and both directions", {
 
   m4 <- twalk_move(2, obj_fun, supp_fun, x, U, xp, Up, p_traverse = 0, p_walk = 0, p_blow = 0)
   expect_named(m4, c("y", "prop_U", "yp", "prop_Up", "alpha"))
+
+  moves <- list(m1, m2, m3, m4)
+  expect_true(all(vapply(
+    moves,
+    function(move) move$alpha >= 0 && move$alpha <= 1,
+    logical(1)
+  )))
 
   supp_false <- function(p, ...) FALSE
   m_fail <- twalk_move(2, obj_fun, supp_false, x, U, xp, Up, p_traverse = 1, p_walk = 0, p_blow = 0)
