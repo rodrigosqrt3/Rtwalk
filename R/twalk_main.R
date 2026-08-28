@@ -1,3 +1,12 @@
+.detect_available_cores <- function(detector = parallel::detectCores) {
+  detected_cores <- detector()
+  if (is.na(detected_cores)) {
+    detected_cores <- 1L
+  }
+
+  detected_cores
+}
+
 #' Run the t-walk MCMC Algorithm
 #'
 #' This function implements the t-walk algorithm by Christen & Fox (2010),
@@ -261,10 +270,7 @@ twalk <- function(log_posterior, n_iter, x0, xp0,
   else {
 
     if (is.null(n_cores)) {
-      detected_cores <- parallel::detectCores()
-      if (is.na(detected_cores)) {
-        detected_cores <- 1L
-      }
+      detected_cores <- .detect_available_cores()
       n_cores <- max(1L, detected_cores - 1L)
     }
     n_cores_used <- min(n_chains, n_cores)

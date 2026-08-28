@@ -130,6 +130,12 @@ test_that("twalk parallel mode automatically detects cores when n_cores is NULL"
   expect_s3_class(res, "twalk")
 })
 
+test_that("core detection falls back safely when detection is unavailable", {
+  unavailable_detector <- function() NA_integer_
+
+  expect_equal(.detect_available_cores(unavailable_detector), 1L)
+})
+
 test_that("parallel mode respects set.seed", {
   log_post <- function(x) -0.5 * sum(x^2)
 
@@ -222,6 +228,24 @@ test_that("parallel mode recursively exports helper dependencies", {
       n_iter = 20,
       x0 = c(0, 0),
       xp0 = c(1, -1),
+      n_chains = 2,
+      n_cores = 2,
+      show_progress = FALSE
+    )
+  )
+
+  expect_s3_class(result, "twalk")
+})
+
+test_that("parallel mode accepts functions without an enclosing environment", {
+  set.seed(123)
+
+  expect_no_error(
+    result <- twalk(
+      log_posterior = base::sum,
+      n_iter = 10,
+      x0 = 0,
+      xp0 = 1,
       n_chains = 2,
       n_cores = 2,
       show_progress = FALSE

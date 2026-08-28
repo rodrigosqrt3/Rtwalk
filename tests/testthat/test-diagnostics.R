@@ -51,4 +51,12 @@ test_that("calculate_diagnostics validates chains", {
     calculate_diagnostics(matrix(1, ncol = 1)),
     "at least two rows"
   )
+  expect_error(
+    calculate_diagnostics(list(1:10)),
+    "numeric matrix or data frame"
+  )
+  expect_error(
+    calculate_diagnostics(matrix(1:2, ncol = 1), burnin_frac = 0.5),
+    "leave at least two samples"
+  )
 })

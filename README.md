@@ -1,4 +1,4 @@
-[![CRAN status](https://www.r-pkg.org/badges/version/Rtwalk)](https://CRAN.R-project.org/package=Rtwalk) [![R-CMD-check](https://github.com/rodrigosqrt3/Rtwalk/actions/workflows/r.yml/badge.svg)](https://github.com/rodrigosqrt3/Rtwalk/actions/workflows/r.yml)
+[![CRAN status](https://www.r-pkg.org/badges/version/Rtwalk)](https://CRAN.R-project.org/package=Rtwalk) [![R-CMD-check](https://github.com/rodrigosqrt3/Rtwalk/actions/workflows/r.yml/badge.svg)](https://github.com/rodrigosqrt3/Rtwalk/actions/workflows/r.yml) [![Codecov test coverage](https://codecov.io/gh/rodrigosqrt3/Rtwalk/branch/main/graph/badge.svg)](https://app.codecov.io/gh/rodrigosqrt3/Rtwalk)
 
 # Rtwalk: An MCMC Sampler Using the t-walk Algorithm
 

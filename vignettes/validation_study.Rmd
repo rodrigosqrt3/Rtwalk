@@ -44,16 +44,16 @@ BURN_FRAC <- 0.2
 # --- TEST 1: Standard Univariate Normal ---
 log_posterior_1 <- function(x) dnorm(x, log = TRUE)
 result_1 <- twalk(log_posterior_1, n_iter = N_ITER_VIGNETTE, x0 = -2, xp0 = 2)
-calculate_diagnostics(result_1$all_samples, BURN_FRAC, "theta", "Standard Normal")
-visualize_results(result_1$all_samples, 0, "Test 1: Standard Normal")
+calculate_diagnostics(result_1$samples, BURN_FRAC, "theta", "Standard Normal")
+visualize_results(result_1$samples, 0, "Test 1: Standard Normal")
 
 # --- TEST 2: Correlated Bivariate Normal ---
 true_mean_2 <- c(1, -0.5)
 true_cov_2 <- matrix(c(4, 0.7*2*1.5, 0.7*2*1.5, 2.25), 2, 2)
 log_posterior_2 <- function(x) mvtnorm::dmvnorm(x, mean = true_mean_2, sigma = true_cov_2, log = TRUE)
 result_2 <- twalk(log_posterior_2, n_iter = N_ITER_VIGNETTE, x0 = c(0,0), xp0 = c(2,-1))
-calculate_diagnostics(result_2$all_samples, BURN_FRAC, c("theta1", "theta2"), "Bivariate Normal")
-visualize_results(result_2$all_samples, true_mean_2, "Test 2: Bivariate Normal", true_covariance = true_cov_2)
+calculate_diagnostics(result_2$samples, BURN_FRAC, c("theta1", "theta2"), "Bivariate Normal")
+visualize_results(result_2$samples, true_mean_2, "Test 2: Bivariate Normal", true_covariance = true_cov_2)
 
 # --- TEST 3: Funnel Distribution ---
 log_posterior_3 <- function(x) {
@@ -64,8 +64,8 @@ log_posterior_3 <- function(x) {
   return(log_prior_x1 + log_lik_x2)
 }
 result_3 <- twalk(log_posterior_3, n_iter = N_ITER_VIGNETTE, x0 = c(-1.5, -0.2), xp0 = c(1.5, -0.2))
-calculate_diagnostics(result_3$all_samples, BURN_FRAC, c("theta1", "theta2"), "Funnel")
-visualize_results(result_3$all_samples, NULL, "Test 3: Funnel")
+calculate_diagnostics(result_3$samples, BURN_FRAC, c("theta1", "theta2"), "Funnel")
+visualize_results(result_3$samples, NULL, "Test 3: Funnel")
 
 # --- TEST 4: Rosenbrock Distribution ---
 log_posterior_4 <- function(x) {
@@ -75,8 +75,8 @@ log_posterior_4 <- function(x) {
   return(-k * (100 * (x2 - x1^2)^2 + (1 - x1)^2))
 }
 result_4 <- twalk(log_posterior_4, n_iter = 100000, x0 = c(0,0), xp0 = c(-1,1))
-calculate_diagnostics(result_4$all_samples, BURN_FRAC, c("theta1", "theta2"), "Rosenbrock")
-visualize_results(result_4$all_samples, c(1,1), "Test 4: Rosenbrock")
+calculate_diagnostics(result_4$samples, BURN_FRAC, c("theta1", "theta2"), "Rosenbrock")
+visualize_results(result_4$samples, c(1,1), "Test 4: Rosenbrock")
 
 # --- TEST 5: Gaussian Mixture ---
 weight1 <- 0.7; mean1 <- c(6, 0); sigma1_1 <- 4; sigma1_2 <- 5; rho1 <- 0.8
@@ -90,16 +90,16 @@ log_posterior_5 <- function(x) {
 }
 
 result_5 <- twalk(log_posterior_5, n_iter = 100000, x0 = mean1, xp0 = mean2)
-calculate_diagnostics(result_5$all_samples, BURN_FRAC, c("theta1", "theta2"), "Gaussian Mixture")
-visualize_results(result_5$all_samples, NULL, "Test 5: Gaussian Mixture")
+calculate_diagnostics(result_5$samples, BURN_FRAC, c("theta1", "theta2"), "Gaussian Mixture")
+visualize_results(result_5$samples, NULL, "Test 5: Gaussian Mixture")
 
 # --- TEST 6: High Dimensionality (10D) ---
 n_dim_6 <- 10; true_mean_6 <- 1:n_dim_6; rho <- 0.7
 true_cov_6 <- matrix(rho^abs(outer(1:n_dim_6, 1:n_dim_6, "-")), n_dim_6, n_dim_6)
 log_posterior_6 <- function(x) mvtnorm::dmvnorm(x, mean = true_mean_6, sigma = true_cov_6, log = TRUE)
 result_6 <- twalk(log_posterior_6, n_iter = N_ITER_VIGNETTE, x0 = rep(0, n_dim_6), xp0 = rep(2, n_dim_6))
-calculate_diagnostics(result_6$all_samples, BURN_FRAC, paste0("theta", 1:n_dim_6), "10D Normal")
-visualize_results(result_6$all_samples, true_mean_6, "Test 6: 10D Normal")
+calculate_diagnostics(result_6$samples, BURN_FRAC, paste0("theta", 1:n_dim_6), "10D Normal")
+visualize_results(result_6$samples, true_mean_6, "Test 6: 10D Normal")
 
 # --- TEST 7: Bayesian Logistic Regression ---
 set.seed(123); n_obs <- 2000
@@ -113,9 +113,25 @@ log_posterior_7 <- function(beta, X, y) {
   return(log_lik + log_prior) 
 }
 result_7 <- twalk(log_posterior_7, n_iter = N_ITER_VIGNETTE, x0 = c(0,0,0), xp0 = c(0.2,-0.2,0.1), X = X, y = y)
-calculate_diagnostics(result_7$all_samples, BURN_FRAC, c("beta0", "beta1", "beta2"), "Logistic Regression")
-visualize_results(result_7$all_samples, true_beta, "Test 7: Logistic Regression")
+calculate_diagnostics(result_7$samples, BURN_FRAC, c("beta0", "beta1", "beta2"), "Logistic Regression")
+visualize_results(result_7$samples, true_beta, "Test 7: Logistic Regression")
 ```
+
+## Understanding the returned trajectories
+
+Each t-walk chain evolves two points. The primary, time-ordered trajectory used
+by `summary()` and the examples above is stored in `samples`; the auxiliary
+trajectory is stored in `companion_samples`. The `all_samples` field is a
+backward-compatible row binding of both trajectories and is not itself one
+time-ordered Markov chain.
+
+The returned `acceptance_rate` follows the Metropolis--Hastings definition from
+the original algorithm. `move_rate` reports the proportion of iterations that
+actually changed the state, while `no_move_rate` reports accepted identity
+proposals.
+
+For parallel runs, `summary()` applies burn-in independently to each element of
+`individual_chains` before combining posterior summaries.
 
 ## Study Conclusion
 
