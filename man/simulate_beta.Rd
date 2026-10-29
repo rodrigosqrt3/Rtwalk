@@ -7,7 +7,7 @@
 simulate_beta(at = 6)
 }
 \arguments{
-\item{at}{Shape parameter `a_t` (default 6).}
+\item{at}{Shape parameter \code{a_t} (default 6).}
 }
 \value{
 A numeric value for beta.

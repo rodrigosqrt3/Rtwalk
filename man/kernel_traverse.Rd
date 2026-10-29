@@ -11,14 +11,14 @@ kernel_traverse(n_dim, p_phi, x, xp, beta)
 
 \item{p_phi}{Probability of updating each coordinate.}
 
-\item{x}{Current point `x`.}
+\item{x}{Current point \code{x}.}
 
-\item{xp}{Current point `x'`.}
+\item{xp}{Current point \verb{x'}.}
 
 \item{beta}{Step parameter beta.}
 }
 \value{
-A list with the `proposal` and `n_phi` (number of moved coordinates).
+A list with the \code{proposal} and \code{n_phi} (number of moved coordinates).
 }
 \description{
 Generate a proposal for the Traverse kernel

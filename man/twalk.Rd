@@ -12,57 +12,86 @@ twalk(
   n_chains = 1,
   n_cores = NULL,
   show_progress = TRUE,
+  thin = 1,
+  control = twalk_control(),
   ...
 )
 }
 \arguments{
 \item{log_posterior}{A function that takes a parameter vector as its
 first argument and returns one numeric log posterior density. It may
-return `-Inf` outside the support, but must not return vectors, `NA`,
-`NaN`, or `+Inf`.
-Additional arguments can be passed to this function via `...`.}
+return \code{-Inf} outside the support, but must not return vectors, \code{NA},
+\code{NaN}, or \code{+Inf}. If \code{x0} has names, the parameter vector passed to
+\code{log_posterior} carries the same names.
+Additional arguments can be passed to this function via \code{...}.}
 
 \item{n_iter}{The number of iterations to run for each chain.}
 
-\item{x0}{A numeric vector with the initial values for the first point (`x`).}
+\item{x0}{A numeric vector with the initial values for the first point
+(\code{x}), or a matrix with one row per chain.}
 
-\item{xp0}{A numeric vector with the initial values for the second point (`x'`).}
+\item{xp0}{A numeric vector with the initial values for the second point
+(\verb{x'}), or a matrix with one row per chain. It must differ from \code{x0};
+identical initial points produce a degenerate t-walk state.}
 
 \item{n_chains}{The number of independent MCMC chains to run.
-Defaults to `1`, which runs a single chain sequentially. If greater
-than 1, parallel mode is activated.}
+Defaults to \code{1}, which runs a single chain sequentially. If greater
+than 1, parallel mode is activated. Convergence diagnostics such as
+R-hat are most informative when the chains start from dispersed points,
+supplied as matrices in \code{x0} and \code{xp0}.}
 
 \item{n_cores}{The number of CPU cores to use in parallel mode.
-If `NULL` (default), it will attempt to use all available cores minus one.
-Parallel random-number streams are initialized from R's current random
-state, so calling `set.seed()` before `twalk()` makes results reproducible.}
+If \code{NULL} (default), it will attempt to use all available cores minus one.
+Each chain receives its own random-number stream derived from R's current
+random state, so calling \code{set.seed()} before \code{twalk()} makes results
+reproducible, and the results do not depend on \code{n_cores}.}
 
 \item{show_progress}{Logical; whether to display progress bars and status
-messages. Defaults to `TRUE`.}
+messages. Defaults to \code{TRUE}.}
 
-\item{...}{Additional arguments to be passed to the `log_posterior` function.}
+\item{thin}{Positive integer; only every \code{thin}-th iteration is stored.
+All iterations are still run.}
+
+\item{control}{A list of algorithm constants created by \code{\link[=twalk_control]{twalk_control()}}.
+The defaults are those recommended by Christen & Fox (2010).}
+
+\item{...}{Additional arguments to be passed to the \code{log_posterior} function.}
 }
 \value{
-A list containing:
-\item{samples}{The primary t-walk trajectory, with `n_iter` rows per chain.}
-\item{companion_samples}{The auxiliary trajectory maintained by the t-walk.}
-\item{all_samples}{Legacy concatenation of the primary and auxiliary
-      trajectories. This is retained for compatibility and should not be
-      treated as a single time-ordered MCMC chain.}
+An object of class \code{twalk}, a list containing:
+\item{samples}{The primary t-walk trajectory, with \code{n_iter / thin} rows per
+chain. Columns are named after \code{x0}, if it has names.}
+\item{companion_samples}{The auxiliary trajectory maintained by the t-walk,
+or \code{NULL} if \code{store_companion = FALSE} in \code{\link[=twalk_control]{twalk_control()}}.}
+\item{log_posterior, companion_log_posterior}{The log posterior evaluated at
+the stored points of each trajectory, useful to monitor burn-in.}
 \item{acceptance_rate}{The average Metropolis--Hastings acceptance rate
-      across all chains. Accepted identity proposals are included, as
-      required by the t-walk transition kernel.}
+across all chains. Accepted identity proposals are included, as
+required by the t-walk transition kernel.}
 \item{move_rate}{The proportion of iterations in which an accepted
-      proposal actually changed at least one of the two t-walk points.}
+proposal actually changed at least one of the two t-walk points.}
 \item{no_move_rate}{The proportion of iterations containing an accepted
-      identity proposal. It equals `acceptance_rate - move_rate`.}
-\item{n_iter}{The number of iterations generated per chain.}
+identity proposal. It equals \code{acceptance_rate - move_rate}.}
+\item{kernel_statistics}{A data frame reporting the number of proposals,
+acceptances, actual movements, acceptance rate, and movement rate for
+each of the Traverse, Walk, Blow, and Hop kernels.}
+\item{n_iter}{The number of iterations run per chain.}
+\item{thin}{The thinning interval.}
 \item{n_chains}{The number of independent chains.}
-\item{total_iterations}{The total number of primary samples generated
-      (`n_iter * n_chains`).}
+\item{total_iterations}{The total number of iterations run over all chains
+(\code{n_iter * n_chains}).}
 \item{n_dim}{The dimension of the parameter space.}
-\item{individual_chains}{If `n_chains > 1`, a list containing the raw
-      results from each separate chain, useful for diagnostics like R-hat.}
+\item{n_evaluations}{The number of successful log-posterior evaluations.}
+\item{n_errors, first_error}{The number of evaluations that raised an error
+and the first error message.}
+\item{final_state}{For single-chain results, the final points and their
+log posterior values, used by \code{\link[=twalk_continue]{twalk_continue()}}.}
+\item{control}{The \code{\link[=twalk_control]{twalk_control()}} settings used.}
+\item{individual_chains}{If \code{n_chains > 1}, a list containing the raw
+results from each separate chain, useful for diagnostics like R-hat.}
+
+The field \code{all_samples} of earlier versions is deprecated: it is no longer
+stored, and accessing it computes it on the fly with a warning.
 }
 \description{
 This function implements the t-walk algorithm by Christen & Fox (2010),
@@ -70,6 +99,28 @@ a general-purpose MCMC sampler that does not require manual tuning.
 The function can run multiple independent MCMC chains in parallel
 to accelerate execution and facilitate convergence diagnostics.
 }
+\details{
+The t-walk maintains two points, \code{x} and \verb{x'}, and is a Metropolis--Hastings
+sampler on the product space with target \eqn{\pi(x)\pi(x')}. At each
+iteration one of four moves (Traverse, Walk, Blow, Hop) is chosen and only
+one of the two points is updated. The sampler is invariant to changes of
+scale and location of the target, so no tuning is required. The kernel is
+implemented in C++; \code{\link[=twalk_control]{twalk_control()}} gives access to the constants of the
+algorithm and to a pure-R reference implementation.
+}
+\section{Errors in \code{log_posterior}}{
+
+Return \code{-Inf} outside the support of the target. If \code{log_posterior} raises
+an error at a proposal, the proposal is rejected (as if outside the
+support) and a single warning summarizing the errors is issued at the end.
+}
+
+\section{Interrupting}{
+
+In sequential mode, interrupting the computation (for example with Esc or
+Ctrl+C) returns the iterations completed so far, with a warning.
+}
+
 \examples{
 # Example 1: Sampling from a Bivariate Normal (sequential mode)
 # The 'mvtnorm' package is required for this example
@@ -78,24 +129,42 @@ if (requireNamespace("mvtnorm", quietly = TRUE)) {
     mvtnorm::dmvnorm(x, mean = c(0, 0), sigma = matrix(c(1, 0.8, 0.8, 1), 2, 2), log = TRUE)
   }
 
-  # Run with fewer iterations for a quick example
   # Set a seed for reproducibility
   set.seed(123)
   result_seq <- twalk(log_posterior = log_post, n_iter = 5000,
-                          x0 = c(-1, 1), xp0 = c(1, -1))
+                      x0 = c(-1, 1), xp0 = c(1, -1))
 
   plot(result_seq$samples, pch = '.', main = "t-walk Samples (Sequential)")
 }
 
+# Example 2: named parameters and extra arguments
+log_post_normal <- function(theta, y) {
+  sum(dnorm(y, theta[["mu"]], exp(theta[["log_sigma"]]), log = TRUE))
+}
+y <- c(4.1, 5.3, 3.8, 4.9, 5.6)
+fit <- twalk(log_post_normal, n_iter = 5000,
+             x0 = c(mu = 4, log_sigma = 0), xp0 = c(mu = 5, log_sigma = 1),
+             y = y, show_progress = FALSE)
+summary(fit)
+
 \donttest{
-# Example 2: The same problem in parallel (will run faster)
-# Using 2 chains. n_iter is now per chain.
+# Example 3: two chains in parallel from dispersed starting points
 if (requireNamespace("mvtnorm", quietly = TRUE)) {
   set.seed(123)
   result_par <- twalk(log_posterior = log_post, n_iter = 2500,
-                          x0 = c(-1, 1), xp0 = c(1, -1), n_chains = 2)
-
-  plot(result_par$samples, pch = '.', main = "t-walk Samples (Parallel)")
+                      x0 = rbind(c(-3, 3), c(3, -3)),
+                      xp0 = rbind(c(-2, 2), c(2, -2)),
+                      n_chains = 2, n_cores = 2)
+  summary(result_par)
 }
 }
+}
+\references{
+Christen, J. A. and Fox, C. (2010). A general purpose sampling
+algorithm for continuous distributions (the t-walk). \emph{Bayesian Analysis},
+5(2), 263--282. \doi{10.1214/10-BA603}
+}
+\seealso{
+\code{\link[=twalk_continue]{twalk_continue()}} to extend a run, \code{\link[=twalk_step]{twalk_step()}} to use the
+t-walk kernel inside other samplers, \code{\link[=summary.twalk]{summary.twalk()}}, \code{\link[=plot.twalk]{plot.twalk()}}.
 }

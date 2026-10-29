@@ -11,14 +11,14 @@ kernel_walk(n_dim, p_phi, aw, x, xp)
 
 \item{p_phi}{Probability of updating each coordinate.}
 
-\item{aw}{Scale parameter `a_w` (default 1.5).}
+\item{aw}{Scale parameter \code{a_w} (default 1.5).}
 
-\item{x}{Current point `x`.}
+\item{x}{Current point \code{x}.}
 
-\item{xp}{Current point `x'`.}
+\item{xp}{Current point \verb{x'}.}
 }
 \value{
-A list with the `proposal` and `n_phi`.
+A list with the \code{proposal} and \code{n_phi}.
 }
 \description{
 Generate a proposal for the Walk kernel

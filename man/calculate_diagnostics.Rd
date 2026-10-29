@@ -18,16 +18,37 @@ discarded separately from each chain.}
 
 \item{burnin_frac}{Fraction of samples to discard as burn-in.}
 
-\item{param_names}{Optional character vector of parameter names.}
+\item{param_names}{Optional character vector of parameter names. By
+default, the column names of \code{samples} are used, if any.}
 
 \item{title}{Optional title for printed output.}
 }
 \value{
-A data frame with posterior summaries and effective sample sizes.
+A data frame with posterior summaries, ESS (bulk and tail), MCSE,
+IAT, and R-hat, returned invisibly after being printed.
 }
 \description{
-Computes posterior summaries (mean, SD, quantiles) and
-effective sample sizes after discarding a burn-in fraction.
+Computes posterior summaries, effective sample sizes, Monte Carlo standard
+errors (MCSE), integrated autocorrelation times (IAT), and R-hat values
+after discarding a burn-in fraction.
+}
+\details{
+The convergence diagnostics follow Vehtari et al. (2021) and agree with
+those of the \pkg{posterior} package:
+\itemize{
+\item \code{ESS} is the effective sample size for the mean, estimated from split
+chains with Geyer's (1992) initial monotone sequence; \code{MCSE = SD / sqrt(ESS)} and \code{IAT = N / ESS}, where \code{N} is the number of retained
+draws. The IAT is the integrated autocorrelation time used by
+Christen & Fox (2010) to compare samplers.
+\item \code{ESS_bulk} and \code{ESS_tail} are the rank-normalized bulk and tail
+effective sample sizes.
+\item \code{Rhat} is the rank-normalized split-R-hat (the maximum of its bulk and
+tail versions). Because chains are split in halves, it is also defined
+for a single chain. Values above 1.01 indicate lack of convergence.
+}
+
+When chains have different lengths, ESS and R-hat use the first draws of
+each chain up to the length of the shortest one.
 }
 \examples{
 log_post <- function(x) dnorm(x, log = TRUE)
@@ -39,4 +60,13 @@ calculate_diagnostics(
   title = "Standard normal"
 )
 
+}
+\references{
+Vehtari, A., Gelman, A., Simpson, D., Carpenter, B. and Buerkner, P.-C.
+(2021). Rank-normalization, folding, and localization: An improved R-hat
+for assessing convergence of MCMC. \emph{Bayesian Analysis}, 16(2), 667--718.
+\doi{10.1214/20-BA1221}
+
+Geyer, C. J. (1992). Practical Markov chain Monte Carlo. \emph{Statistical
+Science}, 7(4), 473--483.
 }

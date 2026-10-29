@@ -26,6 +26,10 @@ visualize_results(
 
 \item{show_acf}{Logical; whether to display autocorrelation plots.}
 }
+\value{
+No return value; called for its side effect of drawing plots on
+the current graphics device.
+}
 \description{
 Produces trace plots, marginal densities and joint plots
 depending on the dimension of the parameter space.

@@ -8,9 +8,20 @@
 
 This package provides an implementation of the t-walk algorithm, as originally proposed by Christen & Fox (2010). The t-walk is a robust, self-adjusting MCMC sampler, which means it does not require the tedious manual tuning of proposal parameters. It is designed to efficiently explore a wide range of target distributions, maintaining good performance even in high-dimensional or multimodal problems.
 
-The implementation supports reproducible sequential and parallel chains,
-convergence summaries, visualization helpers, constrained parameter spaces,
-and numerically stable Metropolis--Hastings acceptance probabilities.
+Highlights:
+
+* **Faithful to the paper.** The default settings are those of Christen & Fox
+  (2010). A pure-R reference implementation follows the paper line by line,
+  and the compiled C++ engine is tested to reproduce it draw by draw.
+* **Fast.** The overhead per iteration is about 2 microseconds, so the cost of
+  sampling is dominated by your log posterior.
+* **Modern diagnostics.** Rank-normalized R-hat and bulk/tail effective sample
+  sizes (Vehtari et al., 2021), integrated autocorrelation times and Monte
+  Carlo standard errors, plus conversion to `coda` and `posterior` objects.
+* **Practical tools.** Reproducible parallel chains with dispersed starting
+  points, thinning, continuation of runs (`twalk_continue()`), single
+  transitions for Gibbs hybrids (`twalk_step()`), constrained supports and
+  named parameters.
 
 ## Installation
 
@@ -30,7 +41,13 @@ library(Rtwalk)
 # Define the log-posterior density of the target distribution
 # In this case, a mixture of two normal distributions
 log_posterior_bimodal <- function(x) {
-  log(0.5 * dnorm(x, mean = -3, sd = 0.5) + 0.5 * dnorm(x, mean = 3, sd = 0.5))
+  log_component_1 <- log(0.5) + dnorm(x, mean = -3, sd = 0.5, log = TRUE)
+  log_component_2 <- log(0.5) + dnorm(x, mean = 3, sd = 0.5, log = TRUE)
+  max_log <- max(log_component_1, log_component_2)
+
+  max_log + log(
+    exp(log_component_1 - max_log) + exp(log_component_2 - max_log)
+  )
 }
 
 initial_point_1 <- -3
@@ -52,17 +69,21 @@ samples <- result$samples[
 
 par(mfrow = c(1, 2))
 hist(samples, breaks = 50, freq = FALSE, 
-     main = "Posterior Distribution", xlab = "Parameter Value")
+    main = "Posterior Distribution", xlab = "Parameter Value")
 lines(density(samples), col = "blue", lwd = 2)
 
 plot(samples, type = 'l', col = "grey30", 
-     main = "Trace Plot", xlab = "Iteration")
+    main = "Trace Plot", xlab = "Iteration")
 ```
 
 The primary time-ordered trajectory is stored in `result$samples`. The
-auxiliary t-walk trajectory is available as `result$companion_samples`.
-`result$all_samples` is retained for backward compatibility, but should not be
-interpreted as one time-ordered chain.
+auxiliary t-walk trajectory is available as `result$companion_samples`, and
+the log posterior of the stored points as `result$log_posterior`.
+
+```r
+summary(result)   # posterior summaries, ESS, MCSE, IAT and R-hat
+plot(result)      # traces of the log posterior and of the parameters
+```
 
 Acceptance and movement can be inspected separately:
 
@@ -75,10 +96,27 @@ Here, `acceptance_rate` is the Metropolis--Hastings acceptance rate,
 `no_move_rate` counts accepted identity proposals from the original t-walk
 transition kernel.
 
+Proposal behavior can also be inspected separately for each t-walk kernel:
+
+```r
+result$kernel_statistics
+```
+
+This table reports the number of proposed, accepted, and state-changing moves
+for the Traverse, Walk, Blow, and Hop kernels, together with their individual
+acceptance and movement rates.
+
+`print(result)` reports the overall sampler rates, while `summary(result)`
+returns a table of posterior summaries and convergence diagnostics (bulk and
+tail ESS, MCSE, IAT and rank-normalized R-hat), printed together with the
+per-kernel performance.
+
 ## Parallel chains
 
-Multiple reproducible chains can be run in parallel. Calling `set.seed()`
-before `twalk()` controls the parallel random-number streams:
+Multiple reproducible chains can be run in parallel. Give one starting point
+per chain (as matrix rows) so that R-hat can detect lack of convergence.
+Calling `set.seed()` before `twalk()` makes the results reproducible, whatever
+the number of cores:
 
 ```r
 set.seed(123)
@@ -86,15 +124,53 @@ set.seed(123)
 parallel_result <- twalk(
   log_posterior = log_posterior_bimodal,
   n_iter = 25000,
-  x0 = initial_point_1,
-  xp0 = initial_point_2,
-  n_chains = 2,
+  x0 = matrix(c(-4, -2, 2, 4), ncol = 1),
+  xp0 = matrix(c(-3, -1, 1, 3), ncol = 1),
+  n_chains = 4,
   n_cores = 2,
   show_progress = FALSE
 )
 
 summary(parallel_result, burnin_frac = 0.2)
 ```
+
+## Longer runs and fine control
+
+```r
+# Continue the same Markov chain for 50,000 more iterations
+result <- twalk_continue(result, log_posterior_bimodal, n_iter = 50000)
+
+# Store one iteration in ten and drop the companion trajectory
+light <- twalk(log_posterior_bimodal, n_iter = 1e6, x0 = -3, xp0 = 3,
+               thin = 10, control = twalk_control(store_companion = FALSE))
+```
+
+The constants of the algorithm are available through `twalk_control()`; their
+defaults are those recommended by Christen & Fox (2010) and rarely need to be
+changed.
+
+## Vignettes
+
+* `vignette("validation_study", package = "Rtwalk")`: the workflow of the
+  package on targets with known answers.
+* `vignette("reproducing_christen_fox", package = "Rtwalk")`: the experiments
+  of the original article, reproduced with this implementation.
+* `vignette("sampler_comparison", package = "Rtwalk")`: a benchmark against
+  random-walk and adaptive Metropolis, an affine-invariant ensemble sampler
+  and slice sampling.
+
+Results can also be converted directly to standard `coda` objects:
+
+```r
+single_chain <- coda::as.mcmc(result, burnin_frac = 0.2)
+parallel_chains <- coda::as.mcmc.list(
+  parallel_result,
+  burnin_frac = 0.2
+)
+```
+
+The conversion preserves chain boundaries for parallel output. Set
+`companion = TRUE` to convert the auxiliary trajectory instead.
 
 ## Citation
 
@@ -104,6 +180,6 @@ This package is an implementation of the algorithm described in the following pa
 
 ## License
 
-This package is licensed under the GPL-3. See the `LICENSE` file for more details.
+This package is licensed under GPL-3.
 
 

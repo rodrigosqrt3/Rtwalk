@@ -1,7 +1,172 @@
-#' @importFrom stats sd quantile acf density
+#' @importFrom stats sd quantile acf density fft nextn qnorm median var
 #' @importFrom graphics par layout hist lines polygon
 #' @importFrom grDevices adjustcolor
 NULL
+
+# Convergence diagnostics of Vehtari, Gelman, Simpson, Carpenter & Buerkner
+# (2021), "Rank-normalization, folding, and localization: An improved R-hat
+# for assessing convergence of MCMC", Bayesian Analysis 16(2), 667-718.
+# The estimators reproduce those of the 'posterior' package; the test suite
+# compares both. Throughout, `draws` is an iterations x chains matrix.
+
+.is_constant_draws <- function(draws) {
+  anyNA(draws) || any(!is.finite(draws)) ||
+    abs(max(draws) - min(draws)) < .Machine$double.eps
+}
+
+.split_chains <- function(draws) {
+  draws <- as.matrix(draws)
+  n <- nrow(draws)
+  half <- n / 2
+  cbind(
+    draws[seq_len(floor(half)), , drop = FALSE],
+    draws[seq.int(ceiling(half + 1), n), , drop = FALSE]
+  )
+}
+
+.z_scale <- function(draws) {
+  ranks <- rank(draws, ties.method = "average")
+  c <- 3 / 8
+  z <- stats::qnorm((ranks - c) / (length(ranks) - 2 * c + 1))
+  array(z, dim = dim(draws))
+}
+
+# Biased autocovariance estimate (Geyer, 1992) computed with the FFT.
+.autocovariance <- function(x) {
+  n <- length(x)
+  var_x <- stats::var(x)
+  if (var_x == 0) {
+    return(rep(0, n))
+  }
+  m2 <- 2 * stats::nextn(n)
+  centred <- c(x - mean(x), rep.int(0, m2 - n))
+  ac <- Re(stats::fft(abs(stats::fft(centred))^2, inverse = TRUE)[seq_len(n)])
+  ac / ac[1L] * var_x * (n - 1) / n
+}
+
+# Multi-chain effective sample size with Geyer's initial monotone sequence.
+.ess_draws <- function(draws) {
+  draws <- as.matrix(draws)
+  n_chains <- ncol(draws)
+  n <- nrow(draws)
+  if (n < 3L || .is_constant_draws(draws)) {
+    return(NA_real_)
+  }
+
+  acov <- apply(draws, 2, .autocovariance)
+  acov_means <- rowMeans(acov)
+  mean_var <- acov_means[1L] * n / (n - 1)
+  var_plus <- mean_var * (n - 1) / n
+  if (n_chains > 1L) {
+    var_plus <- var_plus + stats::var(colMeans(draws))
+  }
+
+  rho_hat <- rep.int(0, n)
+  t <- 0
+  rho_hat_even <- 1
+  rho_hat[t + 1] <- rho_hat_even
+  rho_hat_odd <- 1 - (mean_var - acov_means[t + 2]) / var_plus
+  rho_hat[t + 2] <- rho_hat_odd
+
+  while (t < n - 5 && !is.nan(rho_hat_even + rho_hat_odd) &&
+         (rho_hat_even + rho_hat_odd > 0)) {
+    t <- t + 2
+    rho_hat_even <- 1 - (mean_var - acov_means[t + 1]) / var_plus
+    rho_hat_odd <- 1 - (mean_var - acov_means[t + 2]) / var_plus
+    if ((rho_hat_even + rho_hat_odd) >= 0) {
+      rho_hat[t + 1] <- rho_hat_even
+      rho_hat[t + 2] <- rho_hat_odd
+    }
+  }
+  max_t <- t
+  if (rho_hat_even > 0) {
+    rho_hat[max_t + 1] <- rho_hat_even
+  }
+
+  # Geyer's initial monotone sequence
+  t <- 0
+  while (t <= max_t - 4) {
+    t <- t + 2
+    if (rho_hat[t + 1] + rho_hat[t + 2] > rho_hat[t - 1] + rho_hat[t]) {
+      rho_hat[t + 1] <- (rho_hat[t - 1] + rho_hat[t]) / 2
+      rho_hat[t + 2] <- rho_hat[t + 1]
+    }
+  }
+
+  ess <- n_chains * n
+  tau_hat <- -1 + 2 * sum(rho_hat[seq_len(max_t)]) + rho_hat[max_t + 1]
+  tau_hat <- max(tau_hat, 1 / log10(ess))
+  ess / tau_hat
+}
+
+.rhat_draws <- function(draws) {
+  draws <- as.matrix(draws)
+  if (.is_constant_draws(draws)) {
+    return(NA_real_)
+  }
+  n <- nrow(draws)
+  chain_means <- colMeans(draws)
+  chain_vars <- apply(draws, 2, stats::var)
+  var_between <- n * stats::var(chain_means)
+  var_within <- mean(chain_vars)
+  sqrt((var_between / var_within + n - 1) / n)
+}
+
+# Rank-normalized split-R-hat: the maximum of the bulk and tail (folded)
+# versions. Defined for a single chain as well, through splitting.
+.rhat_rank <- function(draws) {
+  if (.is_constant_draws(draws)) {
+    return(NA_real_)
+  }
+  folded <- abs(draws - stats::median(draws))
+  max(
+    .rhat_draws(.z_scale(.split_chains(draws))),
+    .rhat_draws(.z_scale(.split_chains(folded)))
+  )
+}
+
+.ess_basic <- function(draws) .ess_draws(.split_chains(draws))
+
+.ess_bulk <- function(draws) {
+  if (.is_constant_draws(draws)) {
+    return(NA_real_)
+  }
+  .ess_draws(.z_scale(.split_chains(draws)))
+}
+
+.ess_tail <- function(draws) {
+  if (.is_constant_draws(draws)) {
+    return(NA_real_)
+  }
+  ess_quantile <- function(prob) {
+    indicator <- draws <= stats::quantile(draws, prob)
+    storage.mode(indicator) <- "double"
+    .ess_draws(.split_chains(indicator))
+  }
+  min(ess_quantile(0.05), ess_quantile(0.95))
+}
+
+# iterations x chains matrix of one parameter, truncating chains to a common
+# length.
+.parameter_draws <- function(chains, parameter_index) {
+  common_length <- min(vapply(chains, nrow, integer(1)))
+  vapply(
+    chains,
+    function(chain) chain[seq_len(common_length), parameter_index],
+    numeric(common_length)
+  )
+}
+
+.calculate_rhat <- function(chains) {
+  vapply(
+    seq_len(ncol(chains[[1L]])),
+    function(j) {
+      draws <- .parameter_draws(chains, j)
+      if (nrow(as.matrix(draws)) < 4L) NA_real_ else .rhat_rank(draws)
+    },
+    numeric(1)
+  )
+}
 
 .prepare_mcmc_chains <- function(samples, burnin_frac) {
   if (!is.numeric(burnin_frac) || length(burnin_frac) != 1L ||
@@ -52,19 +217,101 @@ NULL
   })
 }
 
+.diagnostics_table <- function(post_burnin_chains, param_names = NULL) {
+  post_burnin_samples <- do.call(rbind, post_burnin_chains)
+  n_param <- ncol(post_burnin_samples)
+
+  if (is.null(param_names)) {
+    param_names <- colnames(post_burnin_samples)
+    if (is.null(param_names) || anyNA(param_names) || any(param_names == "")) {
+      param_names <- paste0("theta", seq_len(n_param))
+    }
+  } else if (!is.character(param_names) || length(param_names) != n_param ||
+             anyNA(param_names)) {
+    stop("`param_names` must be a character vector with one name per parameter.", call. = FALSE)
+  }
+
+  means <- colMeans(post_burnin_samples)
+  sds <- apply(post_burnin_samples, 2, sd)
+  quantiles <- apply(post_burnin_samples, 2, quantile, probs = c(0.025, 0.5, 0.975))
+
+  per_parameter <- vapply(seq_len(n_param), function(j) {
+    draws <- .parameter_draws(post_burnin_chains, j)
+    if (nrow(as.matrix(draws)) < 4L) {
+      return(rep(NA_real_, 5L))
+    }
+    ess <- .ess_basic(draws)
+    c(
+      ess = ess,
+      ess_bulk = .ess_bulk(draws),
+      ess_tail = .ess_tail(draws),
+      iat = length(draws) / ess,
+      rhat = .rhat_rank(draws)
+    )
+  }, numeric(5))
+
+  ess <- per_parameter[1L, ]
+  mcse <- ifelse(is.finite(ess) & ess > 0, sds / sqrt(ess), NA_real_)
+
+  data.frame(
+    Parameter = param_names,
+    Mean = round(means, 4),
+    SD = round(sds, 4),
+    Q2.5 = round(quantiles["2.5%", ], 4),
+    Median = round(quantiles["50%", ], 4),
+    Q97.5 = round(quantiles["97.5%", ], 4),
+    ESS = round(ess, 0),
+    ESS_bulk = round(per_parameter[2L, ], 0),
+    ESS_tail = round(per_parameter[3L, ], 0),
+    MCSE = round(mcse, 4),
+    IAT = round(per_parameter[4L, ], 2),
+    Rhat = round(per_parameter[5L, ], 3),
+    row.names = NULL,
+    stringsAsFactors = FALSE
+  )
+}
+
 #' Calculate MCMC diagnostics
 #'
-#' Computes posterior summaries (mean, SD, quantiles) and
-#' effective sample sizes after discarding a burn-in fraction.
+#' Computes posterior summaries, effective sample sizes, Monte Carlo standard
+#' errors (MCSE), integrated autocorrelation times (IAT), and R-hat values
+#' after discarding a burn-in fraction.
+#'
+#' The convergence diagnostics follow Vehtari et al. (2021) and agree with
+#' those of the \pkg{posterior} package:
+#' * `ESS` is the effective sample size for the mean, estimated from split
+#'   chains with Geyer's (1992) initial monotone sequence; `MCSE = SD /
+#'   sqrt(ESS)` and `IAT = N / ESS`, where `N` is the number of retained
+#'   draws. The IAT is the integrated autocorrelation time used by
+#'   Christen & Fox (2010) to compare samplers.
+#' * `ESS_bulk` and `ESS_tail` are the rank-normalized bulk and tail
+#'   effective sample sizes.
+#' * `Rhat` is the rank-normalized split-R-hat (the maximum of its bulk and
+#'   tail versions). Because chains are split in halves, it is also defined
+#'   for a single chain. Values above 1.01 indicate lack of convergence.
+#'
+#' When chains have different lengths, ESS and R-hat use the first draws of
+#' each chain up to the length of the shortest one.
 #'
 #' @param samples A matrix of MCMC samples (iterations x parameters), or a
 #'   list of matrices for multiple independent chains. For a list, burn-in is
 #'   discarded separately from each chain.
 #' @param burnin_frac Fraction of samples to discard as burn-in.
-#' @param param_names Optional character vector of parameter names.
+#' @param param_names Optional character vector of parameter names. By
+#'   default, the column names of `samples` are used, if any.
 #' @param title Optional title for printed output.
 #'
-#' @return A data frame with posterior summaries and effective sample sizes.
+#' @return A data frame with posterior summaries, ESS (bulk and tail), MCSE,
+#'   IAT, and R-hat, returned invisibly after being printed.
+#'
+#' @references
+#' Vehtari, A., Gelman, A., Simpson, D., Carpenter, B. and Buerkner, P.-C.
+#' (2021). Rank-normalization, folding, and localization: An improved R-hat
+#' for assessing convergence of MCMC. *Bayesian Analysis*, 16(2), 667--718.
+#' \doi{10.1214/20-BA1221}
+#'
+#' Geyer, C. J. (1992). Practical Markov chain Monte Carlo. *Statistical
+#' Science*, 7(4), 473--483.
 #'
 #' @examples
 #' log_post <- function(x) dnorm(x, log = TRUE)
@@ -80,35 +327,7 @@ NULL
 
 calculate_diagnostics <- function(samples, burnin_frac = 0.2, param_names = NULL, title = "") {
   post_burnin_chains <- .prepare_mcmc_chains(samples, burnin_frac)
-
-  post_burnin_samples <- do.call(rbind, post_burnin_chains)
-  n_param <- ncol(post_burnin_samples)
-
-  if (is.null(param_names)) {
-    param_names <- paste0("theta", 1:n_param)
-  } else if (!is.character(param_names) || length(param_names) != n_param ||
-             anyNA(param_names)) {
-    stop("`param_names` must be a character vector with one name per parameter.", call. = FALSE)
-  }
-
-  means <- apply(post_burnin_samples, 2, mean)
-  sds <- apply(post_burnin_samples, 2, sd)
-  quantiles <- apply(post_burnin_samples, 2, quantile, probs = c(0.025, 0.5, 0.975))
-
-  ess_by_chain <- lapply(post_burnin_chains, function(chain) {
-    coda::effectiveSize(coda::as.mcmc(chain))
-  })
-  ess <- Reduce(`+`, ess_by_chain)
-
-  results_table <- data.frame(
-    Parameter = param_names,
-    Mean = round(means, 4),
-    SD = round(sds, 4),
-    Q2.5 = round(quantiles["2.5%", ], 4),
-    Median = round(quantiles["50%", ], 4),
-    Q97.5 = round(quantiles["97.5%", ], 4),
-    ESS = round(ess, 0)
-  )
+  results_table <- .diagnostics_table(post_burnin_chains, param_names)
 
   cat("\nCONVERGENCE DIAGNOSTICS -", title, "\n")
   print(results_table, row.names = FALSE)
@@ -126,6 +345,9 @@ calculate_diagnostics <- function(samples, burnin_frac = 0.2, param_names = NULL
 #' @param burnin_frac Burn-in fraction.
 #' @param true_covariance Optional true covariance matrix.
 #' @param show_acf Logical; whether to display autocorrelation plots.
+#'
+#' @return No return value; called for its side effect of drawing plots on
+#'   the current graphics device.
 #'
 #' @examples
 #' log_post <- function(x) dnorm(x, log = TRUE)

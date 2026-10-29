@@ -1,5 +1,9 @@
-# Basic helper functions
-dot_product <- function(x, y) { sum(x * y) }
+# Reference implementation of the t-walk transition kernel.
+#
+# The functions in this file follow Christen & Fox (2010) as literally as
+# possible and are the specification for the compiled engine in
+# src/twalk_engine.cpp. Both engines draw random numbers in the same order, so
+# they produce identical chains for the same seed (see tests/testthat).
 
 #' Simulate the beta parameter for the Traverse kernel
 #'
@@ -134,127 +138,246 @@ log_density_hop <- function(n_phi, phi, h, x, xp) {
   if (sigma < .Machine$double.eps) sigma <- .Machine$double.eps
 
   if (n_phi > 0) {
-    diff_vec <- h - x
-    (n_phi / 2) * log(2*pi) - n_phi * log(3) + n_phi * log(max(phi * abs(xp - x))) + 0.5 * sum(diff_vec^2) / (sigma^2)
+    # The continuous part of the Hop proposal is defined only on the
+    # coordinates selected by phi. The remaining coordinates are point masses
+    # at x and must not contribute to the Gaussian density.
+    diff_vec <- h[phi] - x[phi]
+    (n_phi / 2) * log(2 * pi) + n_phi * log(sigma) +
+      0.5 * sum(diff_vec^2) / (sigma^2)
   } else {
     0
   }
 }
 
-#' Run a single t-walk move (step)
+#' Propose a single t-walk move
 #'
-#' Selects one of the four kernels, generates a proposal, and calculates
-#' the Metropolis-Hastings acceptance probability.
-#' @param ... Arguments passed to `log_post_fun` and `support_fun`.
-#' @return A list containing the proposal and the acceptance probability.
+#' Selects one of the four kernels and one of the two points, generates a
+#' proposal and returns everything needed to compute the Metropolis--Hastings
+#' acceptance probability. Following equation (1) of Christen & Fox (2010),
+#' only one point moves: `a` is the point being moved and `b` the other one,
+#' so the proposal is `h(a, b)`.
+#'
+#' @param a Point being moved.
+#' @param b The other point.
+#' @param p_phi Probability of updating each coordinate.
+#' @param aw,at Walk and Traverse parameters.
+#' @param kernel Integer kernel index (1 = traverse, 2 = walk, 3 = blow,
+#'   4 = hop).
+#' @return A list with the proposal `h`, `n_phi`, and the log Hastings
+#'   correction `log_hastings` (excluding the target ratio).
 #' @keywords internal
-twalk_move <- function(n_dim, log_post_fun, support_fun, x, U, xp, Up,
-                       at = 6.0, aw = 1.5,
-                       p_phi = min(n_dim, 4) / n_dim,
-                       p_traverse = 0.4918, p_walk = 0.4918, p_blow = 0.0082, ...) {
+twalk_move <- function(a, b, p_phi, aw, at, kernel) {
+  n_dim <- length(a)
 
-  # Kernel selection probabilities
-  p_hop <- 1 - p_traverse - p_walk - p_blow
-  kernel_probs <- c(p_traverse, p_walk, p_blow, p_hop)
-
-  kernel_choice <- sample.int(4, 1, prob = kernel_probs)
-  direction <- stats::runif(1)
-
-  # Initialize proposal variables
-  y <- NULL; yp <- NULL; prop_U <- NULL; prop_Up <- NULL; alpha <- 0.0
-
-  if (kernel_choice == 1) { # Traverse Kernel
+  if (kernel == 1L) {
     beta <- simulate_beta(at)
-    if (direction < 0.5) {
-      res <- kernel_traverse(n_dim, p_phi, xp, x, beta)
-      yp <- res$proposal; n_phi <- res$n_phi; y <- x; prop_U <- U
-      if (support_fun(yp, ...)) {
-        prop_Up <- log_post_fun(yp, ...)
-        if (n_phi == 0) {
-          alpha <- 1
-        } else {
-          log_alpha <- (U - prop_U) + (Up - prop_Up) +
-            (n_phi - 2) * log(beta)
-          alpha <- acceptance_probability(log_alpha)
-        }
-      }
-    } else {
-      res <- kernel_traverse(n_dim, p_phi, x, xp, beta)
-      y <- res$proposal; n_phi <- res$n_phi; yp <- xp; prop_Up <- Up
-      if (support_fun(y, ...)) {
-        prop_U <- log_post_fun(y, ...)
-        if (n_phi == 0) {
-          alpha <- 1
-        } else {
-          log_alpha <- (U - prop_U) + (Up - prop_Up) +
-            (n_phi - 2) * log(beta)
-          alpha <- acceptance_probability(log_alpha)
-        }
-      }
+    res <- kernel_traverse(n_dim, p_phi, a, b, beta)
+    return(list(
+      h = res$proposal,
+      n_phi = res$n_phi,
+      log_hastings = (res$n_phi - 2) * log(beta)
+    ))
+  }
+
+  if (kernel == 2L) {
+    res <- kernel_walk(n_dim, p_phi, aw, a, b)
+    return(list(h = res$proposal, n_phi = res$n_phi, log_hastings = 0))
+  }
+
+  if (kernel == 3L) {
+    res <- kernel_blow(n_dim, p_phi, a, b)
+    h <- res$proposal
+    hastings <- function() {
+      log_density_blow(res$n_phi, res$phi, h, a, b) -
+        log_density_blow(res$n_phi, res$phi, a, h, b)
     }
-  } else if (kernel_choice == 2) { # Walk Kernel
-    if (direction < 0.5) {
-      res <- kernel_walk(n_dim, p_phi, aw, xp, x)
-      yp <- res$proposal; y <- x; prop_U <- U
-      if (support_fun(yp, ...) && any(yp != y)) {
-        prop_Up <- log_post_fun(yp, ...)
-        log_alpha <- (U - prop_U) + (Up - prop_Up)
-        alpha <- acceptance_probability(log_alpha)
-      }
-    } else {
-      res <- kernel_walk(n_dim, p_phi, aw, x, xp)
-      y <- res$proposal; yp <- xp; prop_Up <- Up
-      if (support_fun(y, ...) && any(y != yp)) {
-        prop_U <- log_post_fun(y, ...)
-        log_alpha <- (U - prop_U) + (Up - prop_Up)
-        alpha <- acceptance_probability(log_alpha)
-      }
-    }
-  } else if (kernel_choice == 3) { # Blow Kernel
-    if (direction < 0.5) {
-      res <- kernel_blow(n_dim, p_phi, xp, x)
-      yp <- res$proposal; n_phi <- res$n_phi; phi <- res$phi; y <- x; prop_U <- U
-      if (support_fun(yp, ...) && any(yp != x)) {
-        prop_Up <- log_post_fun(yp, ...)
-        W1 <- log_density_blow(n_phi, phi, yp, xp, x)
-        W2 <- log_density_blow(n_phi, phi, xp, yp, x)
-        log_alpha <- (U - prop_U) + (Up - prop_Up) + (W1 - W2)
-        alpha <- acceptance_probability(log_alpha)
-      }
-    } else {
-      res <- kernel_blow(n_dim, p_phi, x, xp)
-      y <- res$proposal; n_phi <- res$n_phi; phi <- res$phi; yp <- xp; prop_Up <- Up
-      if (support_fun(y, ...) && any(y != xp)) {
-        prop_U <- log_post_fun(y, ...)
-        W1 <- log_density_blow(n_phi, phi, y, x, xp)
-        W2 <- log_density_blow(n_phi, phi, x, y, xp)
-        log_alpha <- (U - prop_U) + (Up - prop_Up) + (W1 - W2)
-        alpha <- acceptance_probability(log_alpha)
-      }
-    }
-  } else { # Hop Kernel
-    if (direction < 0.5) {
-      res <- kernel_hop(n_dim, p_phi, xp, x)
-      yp <- res$proposal; n_phi <- res$n_phi; phi <- res$phi; y <- x; prop_U <- U
-      if (support_fun(yp, ...) && any(yp != x)) {
-        prop_Up <- log_post_fun(yp, ...)
-        W1 <- log_density_hop(n_phi, phi, yp, xp, x)
-        W2 <- log_density_hop(n_phi, phi, xp, yp, x)
-        log_alpha <- (U - prop_U) + (Up - prop_Up) + (W1 - W2)
-        alpha <- acceptance_probability(log_alpha)
-      }
-    } else {
-      res <- kernel_hop(n_dim, p_phi, x, xp)
-      y <- res$proposal; n_phi <- res$n_phi; phi <- res$phi; yp <- xp; prop_Up <- Up
-      if (support_fun(y, ...) && any(y != xp)) {
-        prop_U <- log_post_fun(y, ...)
-        W1 <- log_density_hop(n_phi, phi, y, x, xp)
-        W2 <- log_density_hop(n_phi, phi, x, y, xp)
-        log_alpha <- (U - prop_U) + (Up - prop_Up) + (W1 - W2)
-        alpha <- acceptance_probability(log_alpha)
-      }
+  } else {
+    res <- kernel_hop(n_dim, p_phi, a, b)
+    h <- res$proposal
+    hastings <- function() {
+      log_density_hop(res$n_phi, res$phi, h, a, b) -
+        log_density_hop(res$n_phi, res$phi, a, h, b)
     }
   }
 
-  list(y = y, prop_U = prop_U, yp = yp, prop_Up = prop_Up, alpha = alpha)
+  list(h = h, n_phi = res$n_phi, log_hastings = hastings)
+}
+
+.kernel_names <- c("traverse", "walk", "blow", "hop")
+
+.check_log_posterior_value <- function(value) {
+  if (!is.numeric(value) || length(value) != 1L) {
+    stop("`log_posterior` must return a single numeric value.", call. = FALSE)
+  }
+
+  value <- as.numeric(value)
+  if (is.na(value) || (is.infinite(value) && value > 0)) {
+    stop(
+      "`log_posterior` must return a finite value or -Inf outside the support.",
+      call. = FALSE
+    )
+  }
+
+  value
+}
+
+# Reference engine. It exposes the same resumable interface as the compiled
+# engine: `run()` may be interrupted by an error raised by the log posterior,
+# after which `pending()` is TRUE and `reject_pending()` completes the
+# iteration as a rejection.
+.engine_r_new <- function(x0, xp0, lp_x0, lp_xp0, n_iter, thin, p_phi,
+                          aw, at, cum_probs, store_companion, names) {
+  state <- new.env(parent = emptyenv())
+  n_dim <- length(x0)
+  n_store <- n_iter %/% thin
+
+  state$x <- as.numeric(x0)
+  state$xp <- as.numeric(xp0)
+  state$lp_x <- lp_x0
+  state$lp_xp <- lp_xp0
+  state$iter <- 0L
+  state$n_evals <- 0L
+  state$pending <- FALSE
+  state$out_x <- matrix(0, n_store, n_dim)
+  state$out_lp_x <- numeric(n_store)
+  if (store_companion) {
+    state$out_xp <- matrix(0, n_store, n_dim)
+    state$out_lp_xp <- numeric(n_store)
+  }
+  state$proposed <- integer(4)
+  state$accepted <- integer(4)
+  state$moved <- integer(4)
+
+  store_iteration <- function() {
+    state$iter <- state$iter + 1L
+    if (state$iter %% thin != 0L) {
+      return(invisible(NULL))
+    }
+    row <- state$iter %/% thin
+    state$out_x[row, ] <- state$x
+    state$out_lp_x[row] <- state$lp_x
+    if (store_companion) {
+      state$out_xp[row, ] <- state$xp
+      state$out_lp_xp[row] <- state$lp_xp
+    }
+    invisible(NULL)
+  }
+
+  evaluate <- function(log_posterior, h) {
+    params <- h
+    names(params) <- names
+    state$pending <- TRUE
+    value <- log_posterior(params)
+    state$pending <- FALSE
+    state$n_evals <- state$n_evals + 1L
+    .check_log_posterior_value(value)
+  }
+
+  step <- function(log_posterior) {
+    u_kernel <- stats::runif(1)
+    kernel <- match(TRUE, u_kernel < cum_probs[1:3], nomatch = 4L)
+    move_xp <- stats::runif(1) < 0.5
+
+    if (move_xp) {
+      a <- state$xp
+      lp_a <- state$lp_xp
+      b <- state$x
+    } else {
+      a <- state$x
+      lp_a <- state$lp_x
+      b <- state$xp
+    }
+
+    move <- twalk_move(a, b, p_phi, aw, at, kernel)
+    h <- move$h
+    state$proposed[kernel] <- state$proposed[kernel] + 1L
+
+    alpha <- 0
+    lp_h <- lp_a
+    if (move$n_phi == 0L) {
+      alpha <- 1
+    } else if (kernel == 1L || any(h != b)) {
+      lp_h <- evaluate(log_posterior, h)
+      if (is.finite(lp_h)) {
+        log_hastings <- move$log_hastings
+        if (is.function(log_hastings)) log_hastings <- log_hastings()
+        alpha <- acceptance_probability((lp_h - lp_a) + log_hastings)
+      }
+    }
+
+    if (stats::runif(1) < alpha) {
+      changed <- any(h != a)
+      if (move_xp) {
+        state$xp <- h
+        state$lp_xp <- lp_h
+      } else {
+        state$x <- h
+        state$lp_x <- lp_h
+      }
+      state$accepted[kernel] <- state$accepted[kernel] + 1L
+      if (changed) state$moved[kernel] <- state$moved[kernel] + 1L
+    }
+
+    store_iteration()
+  }
+
+  list(
+    run = function(log_posterior, n_steps) {
+      if (state$pending) {
+        stop("The t-walk engine has a pending evaluation; reject it first.", call. = FALSE)
+      }
+      last <- min(n_iter, state$iter + n_steps)
+      while (state$iter < last) step(log_posterior)
+      state$iter
+    },
+    reject_pending = function() {
+      if (!state$pending) {
+        stop("The t-walk engine has no pending evaluation.", call. = FALSE)
+      }
+      state$pending <- FALSE
+      stats::runif(1)
+      store_iteration()
+      state$iter
+    },
+    pending = function() state$pending,
+    iter = function() state$iter,
+    result = function() {
+      n_done <- state$iter %/% thin
+      keep <- seq_len(n_done)
+      list(
+        samples = state$out_x[keep, , drop = FALSE],
+        companion_samples = if (store_companion) state$out_xp[keep, , drop = FALSE],
+        log_posterior = state$out_lp_x[keep],
+        companion_log_posterior = if (store_companion) state$out_lp_xp[keep],
+        proposed = state$proposed,
+        accepted = state$accepted,
+        moved = state$moved,
+        x = state$x,
+        xp = state$xp,
+        lp_x = state$lp_x,
+        lp_xp = state$lp_xp,
+        iter = state$iter,
+        n_evals = state$n_evals
+      )
+    }
+  )
+}
+
+.engine_cpp_new <- function(x0, xp0, lp_x0, lp_xp0, n_iter, thin, p_phi,
+                            aw, at, cum_probs, store_companion, names) {
+  ptr <- twalk_engine_new(
+    as.numeric(x0), as.numeric(xp0), lp_x0, lp_xp0,
+    as.integer(n_iter), as.integer(thin), p_phi, aw, at,
+    as.numeric(cum_probs), store_companion, names
+  )
+
+  list(
+    run = function(log_posterior, n_steps) {
+      twalk_engine_run(ptr, log_posterior, as.integer(n_steps))
+    },
+    reject_pending = function() twalk_engine_reject_pending(ptr),
+    pending = function() twalk_engine_pending(ptr),
+    iter = function() twalk_engine_iter(ptr),
+    result = function() twalk_engine_result(ptr)
+  )
 }

@@ -11,12 +11,12 @@ kernel_blow(n_dim, p_phi, x, xp)
 
 \item{p_phi}{Probability of updating each coordinate.}
 
-\item{x}{Current point `x`.}
+\item{x}{Current point \code{x}.}
 
-\item{xp}{Current point `x'`.}
+\item{xp}{Current point \verb{x'}.}
 }
 \value{
-A list with the `proposal`, `n_phi`, and `phi`.
+A list with the \code{proposal}, \code{n_phi}, and \code{phi}.
 }
 \description{
 Generate a proposal for the Blow kernel

@@ -2,137 +2,185 @@
 title: "Validation and Simulation Study for the Rtwalk Package"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{Validation and Simulation Study}
+  %\VignetteIndexEntry{Validation and Simulation Study for the Rtwalk Package}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
 
 ```{r, include = FALSE}
 knitr::opts_chunk$set(
-  echo = TRUE, 
-  comment = NA,   
   collapse = TRUE,
   comment = "#>",
-  fig.width = 8,
-  fig.height = 6,
-  warning = FALSE,
-  message = FALSE,
-  dev = 'png',      
-  fig.align = 'center', 
-  dpi = 96,     
-  out.width = "95%",
-  results = "hide"
+  fig.width = 7,
+  fig.height = 5,
+  dpi = 96,
+  out.width = "100%"
 )
 ```
 
-## Introduction
+This vignette runs the t-walk on targets whose answers are known and compares
+the estimates with the truth. It also shows the basic workflow of the
+package: running chains, checking convergence, and summarizing the output.
+Two further vignettes go deeper: `vignette("reproducing_christen_fox")`
+reproduces the experiments of the original article, and
+`vignette("sampler_comparison")` compares the t-walk with other
+general-purpose samplers.
 
-This document presents the Monte Carlo study used to validate the implementation of the `Rtwalk` package. The objective is to demonstrate that the sampler behaves as expected across a variety of challenging scenarios, replicating classic tests from the MCMC literature.
-
-```{r setup, message=FALSE, warning=FALSE}
+```{r setup}
 library(Rtwalk)
-library(mvtnorm)
+set.seed(2024)
 ```
 
+A small helper puts the posterior summaries of `summary()` next to the true
+values:
 
-## Test Battery
-
-```{r, eval=TRUE, cache=FALSE}
-N_ITER_VIGNETTE <- 5000
-BURN_FRAC <- 0.2
-
-# --- TEST 1: Standard Univariate Normal ---
-log_posterior_1 <- function(x) dnorm(x, log = TRUE)
-result_1 <- twalk(log_posterior_1, n_iter = N_ITER_VIGNETTE, x0 = -2, xp0 = 2)
-calculate_diagnostics(result_1$samples, BURN_FRAC, "theta", "Standard Normal")
-visualize_results(result_1$samples, 0, "Test 1: Standard Normal")
-
-# --- TEST 2: Correlated Bivariate Normal ---
-true_mean_2 <- c(1, -0.5)
-true_cov_2 <- matrix(c(4, 0.7*2*1.5, 0.7*2*1.5, 2.25), 2, 2)
-log_posterior_2 <- function(x) mvtnorm::dmvnorm(x, mean = true_mean_2, sigma = true_cov_2, log = TRUE)
-result_2 <- twalk(log_posterior_2, n_iter = N_ITER_VIGNETTE, x0 = c(0,0), xp0 = c(2,-1))
-calculate_diagnostics(result_2$samples, BURN_FRAC, c("theta1", "theta2"), "Bivariate Normal")
-visualize_results(result_2$samples, true_mean_2, "Test 2: Bivariate Normal", true_covariance = true_cov_2)
-
-# --- TEST 3: Funnel Distribution ---
-log_posterior_3 <- function(x) {
-  x1 <- x[1]
-  x2 <- x[2]
-  log_prior_x1 <- dnorm(x1, mean = 0, sd = 3, log = TRUE)
-  log_lik_x2 <- dnorm(x2, mean = 0, sd = exp(x1 / 2), log = TRUE)
-  return(log_prior_x1 + log_lik_x2)
+```{r helper}
+compare <- function(fit, truth, burnin_frac = 0.2) {
+  s <- summary(fit, burnin_frac = burnin_frac)
+  data.frame(
+    parameter = s$Parameter, true_mean = truth$mean, estimate = s$Mean,
+    mcse = s$MCSE, true_sd = truth$sd, sd = s$SD, ess_bulk = s$ESS_bulk,
+    rhat = s$Rhat
+  )
 }
-result_3 <- twalk(log_posterior_3, n_iter = N_ITER_VIGNETTE, x0 = c(-1.5, -0.2), xp0 = c(1.5, -0.2))
-calculate_diagnostics(result_3$samples, BURN_FRAC, c("theta1", "theta2"), "Funnel")
-visualize_results(result_3$samples, NULL, "Test 3: Funnel")
-
-# --- TEST 4: Rosenbrock Distribution ---
-log_posterior_4 <- function(x) {
-  x1 <- x[1]
-  x2 <- x[2]
-  k <- 1 / 20 
-  return(-k * (100 * (x2 - x1^2)^2 + (1 - x1)^2))
-}
-result_4 <- twalk(log_posterior_4, n_iter = 100000, x0 = c(0,0), xp0 = c(-1,1))
-calculate_diagnostics(result_4$samples, BURN_FRAC, c("theta1", "theta2"), "Rosenbrock")
-visualize_results(result_4$samples, c(1,1), "Test 4: Rosenbrock")
-
-# --- TEST 5: Gaussian Mixture ---
-weight1 <- 0.7; mean1 <- c(6, 0); sigma1_1 <- 4; sigma1_2 <- 5; rho1 <- 0.8
-cov1 <- matrix(c(sigma1_1^2, rho1*sigma1_1*sigma1_2, rho1*sigma1_1*sigma1_2, sigma1_2^2), nrow=2)
-
-weight2 <- 0.3; mean2 <- c(-3, 10); sigma2_1 <- 1; sigma2_2 <- 1; rho2 <- 0.1
-cov2 <- matrix(c(sigma2_1^2, rho2*sigma2_1*sigma2_2, rho2*sigma2_1*sigma2_2, sigma2_2^2), nrow=2)
-
-log_posterior_5 <- function(x) {
-  log(weight1 * mvtnorm::dmvnorm(x, mean1, cov1) + weight2 * mvtnorm::dmvnorm(x, mean2, cov2))
-}
-
-result_5 <- twalk(log_posterior_5, n_iter = 100000, x0 = mean1, xp0 = mean2)
-calculate_diagnostics(result_5$samples, BURN_FRAC, c("theta1", "theta2"), "Gaussian Mixture")
-visualize_results(result_5$samples, NULL, "Test 5: Gaussian Mixture")
-
-# --- TEST 6: High Dimensionality (10D) ---
-n_dim_6 <- 10; true_mean_6 <- 1:n_dim_6; rho <- 0.7
-true_cov_6 <- matrix(rho^abs(outer(1:n_dim_6, 1:n_dim_6, "-")), n_dim_6, n_dim_6)
-log_posterior_6 <- function(x) mvtnorm::dmvnorm(x, mean = true_mean_6, sigma = true_cov_6, log = TRUE)
-result_6 <- twalk(log_posterior_6, n_iter = N_ITER_VIGNETTE, x0 = rep(0, n_dim_6), xp0 = rep(2, n_dim_6))
-calculate_diagnostics(result_6$samples, BURN_FRAC, paste0("theta", 1:n_dim_6), "10D Normal")
-visualize_results(result_6$samples, true_mean_6, "Test 6: 10D Normal")
-
-# --- TEST 7: Bayesian Logistic Regression ---
-set.seed(123); n_obs <- 2000
-true_beta <- c(0.5, -1.2, 0.8)
-X <- cbind(1, rnorm(n_obs, 0, 1), rnorm(n_obs, 0, 1.5))
-eta <- X %*% true_beta; prob <- 1 / (1 + exp(-eta)); y <- rbinom(n_obs, 1, prob)
-log_posterior_7 <- function(beta, X, y) { 
-  eta <- X %*% beta
-  log_lik <- sum(y * eta - log(1 + exp(eta)))
-  log_prior <- sum(dnorm(beta, 0, 5, log = TRUE))
-  return(log_lik + log_prior) 
-}
-result_7 <- twalk(log_posterior_7, n_iter = N_ITER_VIGNETTE, x0 = c(0,0,0), xp0 = c(0.2,-0.2,0.1), X = X, y = y)
-calculate_diagnostics(result_7$samples, BURN_FRAC, c("beta0", "beta1", "beta2"), "Logistic Regression")
-visualize_results(result_7$samples, true_beta, "Test 7: Logistic Regression")
 ```
 
-## Understanding the returned trajectories
+## 1. A first example: the standard normal
 
-Each t-walk chain evolves two points. The primary, time-ordered trajectory used
-by `summary()` and the examples above is stored in `samples`; the auxiliary
-trajectory is stored in `companion_samples`. The `all_samples` field is a
-backward-compatible row binding of both trajectories and is not itself one
-time-ordered Markov chain.
+```{r normal}
+fit <- twalk(function(x) dnorm(x, log = TRUE), n_iter = 20000,
+             x0 = -2, xp0 = 2, show_progress = FALSE)
+fit
+compare(fit, list(mean = 0, sd = 1))
+```
 
-The returned `acceptance_rate` follows the Metropolis--Hastings definition from
+The estimate is within a few Monte Carlo standard errors (`mcse`) of the true
+value, the bulk effective sample size is large and R-hat is close to 1.
+
+## 2. Correlated bivariate normal, four chains
+
+Several chains started from dispersed points make the R-hat diagnostic
+informative. Starting points are given as matrices with one row per chain.
+
+```{r bivariate}
+mu <- c(1, -0.5)
+Sigma <- matrix(c(4, 2.1, 2.1, 2.25), 2)
+log_bvn <- function(x) mvtnorm::dmvnorm(x, mu, Sigma, log = TRUE)
+
+starts <- function() matrix(rnorm(8, sd = 5), nrow = 4)
+fit_bvn <- twalk(log_bvn, n_iter = 10000, x0 = starts(), xp0 = starts(),
+                 n_chains = 4, n_cores = 1, show_progress = FALSE)
+compare(fit_bvn, list(mean = mu, sd = sqrt(diag(Sigma))))
+```
+
+`plot()` shows the trace of the log posterior, which is the first thing to
+inspect for burn-in, and of each parameter, with one colour per chain:
+
+```{r bivariate-plot, fig.height = 6}
+plot(fit_bvn)
+```
+
+## 3. A constrained parameter: Gamma posterior
+
+Return `-Inf` outside the support. Named starting points give named
+parameters, both inside `log_posterior` and in the output.
+
+```{r gamma}
+y <- c(2.1, 0.7, 1.9, 3.4, 0.4, 1.2, 2.8, 1.5)
+# Exponential likelihood with rate lambda and a Gamma(2, 1) prior:
+# the posterior is Gamma(2 + n, 1 + sum(y)).
+log_post_rate <- function(theta) {
+  if (theta[["lambda"]] <= 0) return(-Inf)
+  sum(dexp(y, theta[["lambda"]], log = TRUE)) + dgamma(theta[["lambda"]], 2, 1, log = TRUE)
+}
+
+fit_rate <- twalk(log_post_rate, n_iter = 20000, x0 = c(lambda = 0.5),
+                  xp0 = c(lambda = 1), show_progress = FALSE)
+shape <- 2 + length(y); rate <- 1 + sum(y)
+compare(fit_rate, list(mean = shape / rate, sd = sqrt(shape) / rate))
+```
+
+## 4. Ten correlated dimensions
+
+```{r ten}
+d <- 10
+Sigma10 <- 0.7^abs(outer(1:d, 1:d, "-"))
+mu10 <- 1:d
+log_mvn <- function(x) mvtnorm::dmvnorm(x, mu10, Sigma10, log = TRUE)
+
+fit10 <- twalk(log_mvn, n_iter = 1e5, x0 = rep(0, d), xp0 = rep(2, d),
+               show_progress = FALSE, thin = 10)
+compare(fit10, list(mean = mu10, sd = rep(1, d)))
+```
+
+Thinning (`thin = 10`) stores one iteration in ten, which reduces memory use
+in long runs; diagnostics are computed on the stored draws.
+
+## 5. Bayesian logistic regression
+
+Additional arguments of `twalk()` are passed to the log posterior.
+
+```{r logistic}
+n_obs <- 1000
+X <- cbind(1, rnorm(n_obs), rnorm(n_obs, sd = 1.5))
+beta_true <- c(0.5, -1.2, 0.8)
+y_bin <- rbinom(n_obs, 1, plogis(X %*% beta_true))
+
+log_post_logit <- function(beta, X, y) {
+  eta <- drop(X %*% beta)
+  sum(y * eta - pmax(eta, 0) - log1p(exp(-abs(eta)))) +
+    sum(dnorm(beta, 0, 5, log = TRUE))
+}
+
+fit_logit <- twalk(log_post_logit, n_iter = 30000,
+                   x0 = c(b0 = 0, b1 = 0, b2 = 0), xp0 = c(0.2, -0.2, 0.1),
+                   X = X, y = y_bin, show_progress = FALSE)
+
+glm_fit <- glm(y_bin ~ X - 1, family = binomial)
+compare(fit_logit, list(mean = unname(coef(glm_fit)),
+                        sd = unname(sqrt(diag(vcov(glm_fit))))))
+```
+
+With 1000 observations and a vague prior the posterior is close to the
+sampling distribution of the maximum likelihood estimate, so the two agree.
+
+## 6. Continuing a run
+
+If the diagnostics suggest that more iterations are needed, `twalk_continue()`
+extends the same Markov chain from where it stopped:
+
+```{r continue}
+fit_more <- twalk_continue(fit_logit, log_post_logit, n_iter = 30000,
+                           X = X, y = y_bin, show_progress = FALSE)
+fit_more$n_iter
+summary(fit_more)$ESS_bulk
+```
+
+## 7. Interoperability
+
+Results convert to the formats of the **coda** and **posterior** packages:
+
+```{r interop}
+coda::effectiveSize(coda::as.mcmc(fit_logit, burnin_frac = 0.2))
+
+if (requireNamespace("posterior", quietly = TRUE)) {
+  draws <- posterior::as_draws_df(fit_bvn, burnin_frac = 0.2)
+  posterior::summarise_draws(draws)
+}
+```
+
+## 8. How the two points and the rates are reported
+
+Each t-walk chain evolves two points. The primary, time-ordered trajectory
+used by `summary()` is stored in `samples`, the auxiliary one in
+`companion_samples`, and the log posterior of the stored points in
+`log_posterior`.
+
+The returned `acceptance_rate` follows the Metropolis--Hastings definition of
 the original algorithm. `move_rate` reports the proportion of iterations that
 actually changed the state, while `no_move_rate` reports accepted identity
-proposals.
+proposals; `kernel_statistics` breaks these rates down by move:
 
-For parallel runs, `summary()` applies burn-in independently to each element of
-`individual_chains` before combining posterior summaries.
-
-## Study Conclusion
-
-The results from the test battery demonstrate that this implementation of the t-walk is robust and behaves as expected. The sampler was able to converge and efficiently explore distributions with high correlation and multimodality without the need for manual tuning, validating its utility as a general-purpose tool for Bayesian inference.
+```{r rates}
+fit10$kernel_statistics
+```

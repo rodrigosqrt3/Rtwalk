@@ -11,12 +11,29 @@ test_that("twalk runs in sequential mode correctly", {
   expect_equal(res$total_iterations, 100)
   expect_equal(nrow(res$samples), 100)
   expect_equal(nrow(res$companion_samples), 100)
-  expect_equal(nrow(res$all_samples), 200)
-  expect_equal(res$all_samples[1:100, ], res$samples)
-  expect_equal(res$all_samples[101:200, ], res$companion_samples)
+  expect_length(res$log_posterior, 100)
+  expect_length(res$companion_log_posterior, 100)
+  expect_equal(res$log_posterior, apply(res$samples, 1, log_post))
+  expect_equal(res$companion_log_posterior, apply(res$companion_samples, 1, log_post))
   expect_true(res$acceptance_rate >= 0 && res$acceptance_rate <= 1)
   expect_true(res$move_rate >= 0 && res$move_rate <= res$acceptance_rate)
   expect_equal(res$no_move_rate, res$acceptance_rate - res$move_rate)
+  expect_named(
+    res$kernel_statistics,
+    c(
+      "kernel", "proposed", "accepted", "moved",
+      "acceptance_rate", "move_rate"
+    )
+  )
+  expect_equal(sum(res$kernel_statistics$proposed), res$n_iter)
+  expect_equal(
+    sum(res$kernel_statistics$accepted),
+    res$acceptance_rate * res$n_iter
+  )
+  expect_equal(
+    sum(res$kernel_statistics$moved),
+    res$move_rate * res$n_iter
+  )
 })
 
 test_that("twalk can suppress progress output", {
@@ -60,9 +77,17 @@ test_that("twalk handles log-posterior errors and rejects invalid outputs", {
   )
 
   set.seed(42)
-  expect_no_error(
-    twalk(log_posterior = log_post_error_at_points, n_iter = 50, x0 = c(0.1, 0.1), xp0 = c(1, 1))
+  expect_warning(
+    result <- twalk(
+      log_posterior = log_post_error_at_points, n_iter = 200,
+      x0 = c(0.1, 0.1), xp0 = c(1, 1), show_progress = FALSE
+    ),
+    "raised an error in .* First error: Domain error"
   )
+  expect_gt(result$n_errors, 0)
+  expect_identical(result$first_error, "Domain error")
+  expect_true(all(result$samples >= 0))
+  expect_equal(sum(result$kernel_statistics$proposed), 200)
 
   log_post_vector <- function(x) {
     return(c(1, 2))
@@ -103,14 +128,38 @@ test_that("twalk runs in parallel mode correctly", {
   expect_equal(res_par$total_iterations, 100)
   expect_equal(nrow(res_par$samples), 100)
   expect_equal(nrow(res_par$companion_samples), 100)
-  expect_equal(nrow(res_par$all_samples), 200)
+  expect_length(res_par$log_posterior, 100)
   expect_length(res_par$individual_chains, 2)
   expect_true(res_par$acceptance_rate >= 0 && res_par$acceptance_rate <= 1)
   expect_true(res_par$move_rate >= 0 && res_par$move_rate <= res_par$acceptance_rate)
   expect_equal(res_par$no_move_rate, res_par$acceptance_rate - res_par$move_rate)
+  expect_equal(
+    sum(res_par$kernel_statistics$proposed),
+    res_par$total_iterations
+  )
+  expect_equal(
+    sum(res_par$kernel_statistics$accepted),
+    res_par$acceptance_rate * res_par$total_iterations
+  )
+  expect_equal(
+    sum(res_par$kernel_statistics$moved),
+    res_par$move_rate * res_par$total_iterations
+  )
   expect_true(all(vapply(
     res_par$individual_chains,
-    function(chain) !is.null(chain$move_rate) && !is.null(chain$no_move_rate),
+    function(chain) {
+      !is.null(chain$move_rate) &&
+        !is.null(chain$no_move_rate) &&
+        !is.null(chain$kernel_statistics) &&
+        isTRUE(all.equal(
+          chain$move_rate,
+          sum(chain$kernel_statistics$moved) / chain$n_iter
+        )) &&
+        isTRUE(all.equal(
+          chain$no_move_rate,
+          chain$acceptance_rate - chain$move_rate
+        ))
+    },
     logical(1)
   )))
 })
@@ -161,6 +210,7 @@ test_that("parallel mode respects set.seed", {
   expect_identical(first$acceptance_rate, second$acceptance_rate)
   expect_identical(first$move_rate, second$move_rate)
   expect_identical(first$no_move_rate, second$no_move_rate)
+  expect_identical(first$kernel_statistics, second$kernel_statistics)
 })
 
 test_that("parallel mode preserves valid initial points inside constrained support", {
@@ -313,6 +363,10 @@ test_that("twalk validates structural inputs", {
     "must have the same length"
   )
   expect_error(
+    twalk(log_post, n_iter = 10, x0 = c(0, 0), xp0 = c(0, 0)),
+    "must be different initial points"
+  )
+  expect_error(
     twalk(log_post, n_iter = 10, x0 = 0, xp0 = 1, n_chains = 0),
     "`n_chains` must be a positive integer"
   )
@@ -325,8 +379,20 @@ test_that("twalk validates structural inputs", {
     "must be non-empty numeric vectors with finite values"
   )
   expect_error(
-    twalk(log_post, n_iter = 10, x0 = matrix(0), xp0 = 1),
+    twalk(log_post, n_iter = 10, x0 = matrix(0, 2, 1), xp0 = 1),
+    "one row per chain"
+  )
+  expect_error(
+    twalk(log_post, n_iter = 10, x0 = "a", xp0 = 1),
     "must be non-empty numeric vectors with finite values"
+  )
+  expect_error(
+    twalk(log_post, n_iter = 10, x0 = 0, xp0 = 1, thin = 20),
+    "`thin` must be a positive integer"
+  )
+  expect_error(
+    twalk(log_post, n_iter = 10, x0 = 0, xp0 = 1, control = list()),
+    "`control` must be created with `twalk_control\\(\\)`"
   )
   expect_error(
     twalk(1, n_iter = 10, x0 = 0, xp0 = 1),
@@ -387,4 +453,58 @@ test_that("log_posterior is evaluated once per proposal", {
 
   expect_s3_class(result, "twalk")
   expect_equal(evaluations, result$n_iter + 2L)
+})
+
+test_that("twalk is invariant under scalar affine transformations", {
+  log_target <- function(x) {
+    mu <- c(0.5, -1, 2)
+    sd <- c(1, 2, 0.7)
+    -0.5 * sum(((x - mu) / sd)^2)
+  }
+
+  scale <- 4.25
+  shift <- c(10, -3, 7)
+  log_target_transformed <- function(z) {
+    log_target((z - shift) / scale) -
+      length(z) * log(abs(scale))
+  }
+
+  x0 <- c(-1, 0, 1)
+  xp0 <- c(2, -2, 3)
+
+  set.seed(20260829)
+  original <- twalk(
+    log_target,
+    n_iter = 500,
+    x0 = x0,
+    xp0 = xp0,
+    show_progress = FALSE
+  )
+
+  set.seed(20260829)
+  transformed <- twalk(
+    log_target_transformed,
+    n_iter = 500,
+    x0 = scale * x0 + shift,
+    xp0 = scale * xp0 + shift,
+    show_progress = FALSE
+  )
+
+  expected_samples <- sweep(scale * original$samples, 2, shift, "+")
+  expected_companion <- sweep(
+    scale * original$companion_samples,
+    2,
+    shift,
+    "+"
+  )
+
+  expect_equal(transformed$samples, expected_samples, tolerance = 1e-10)
+  expect_equal(
+    transformed$companion_samples,
+    expected_companion,
+    tolerance = 1e-10
+  )
+  expect_identical(transformed$acceptance_rate, original$acceptance_rate)
+  expect_identical(transformed$move_rate, original$move_rate)
+  expect_identical(transformed$no_move_rate, original$no_move_rate)
 })

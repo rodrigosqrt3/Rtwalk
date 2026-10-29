@@ -2,33 +2,31 @@
 % Please edit documentation in R/twalk_engine.R
 \name{twalk_move}
 \alias{twalk_move}
-\title{Run a single t-walk move (step)}
+\title{Propose a single t-walk move}
 \usage{
-twalk_move(
-  n_dim,
-  log_post_fun,
-  support_fun,
-  x,
-  U,
-  xp,
-  Up,
-  at = 6,
-  aw = 1.5,
-  p_phi = min(n_dim, 4)/n_dim,
-  p_traverse = 0.4918,
-  p_walk = 0.4918,
-  p_blow = 0.0082,
-  ...
-)
+twalk_move(a, b, p_phi, aw, at, kernel)
 }
 \arguments{
-\item{...}{Arguments passed to `log_post_fun` and `support_fun`.}
+\item{a}{Point being moved.}
+
+\item{b}{The other point.}
+
+\item{p_phi}{Probability of updating each coordinate.}
+
+\item{aw, at}{Walk and Traverse parameters.}
+
+\item{kernel}{Integer kernel index (1 = traverse, 2 = walk, 3 = blow,
+4 = hop).}
 }
 \value{
-A list containing the proposal and the acceptance probability.
+A list with the proposal \code{h}, \code{n_phi}, and the log Hastings
+correction \code{log_hastings} (excluding the target ratio).
 }
 \description{
-Selects one of the four kernels, generates a proposal, and calculates
-the Metropolis-Hastings acceptance probability.
+Selects one of the four kernels and one of the two points, generates a
+proposal and returns everything needed to compute the Metropolis--Hastings
+acceptance probability. Following equation (1) of Christen & Fox (2010),
+only one point moves: \code{a} is the point being moved and \code{b} the other one,
+so the proposal is \code{h(a, b)}.
 }
 \keyword{internal}
