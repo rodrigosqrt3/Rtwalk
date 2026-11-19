@@ -138,8 +138,11 @@ NULL
   if (.is_constant_draws(draws)) {
     return(NA_real_)
   }
+  # The upper tail uses x >= q, so that the estimate is symmetric under
+  # x -> -x even with ties (as in posterior >= 1.8.0).
   ess_quantile <- function(prob) {
-    indicator <- draws <= stats::quantile(draws, prob)
+    q <- stats::quantile(draws, prob)
+    indicator <- if (prob > 0.5) draws >= q else draws <= q
     storage.mode(indicator) <- "double"
     .ess_draws(.split_chains(indicator))
   }
@@ -265,6 +268,7 @@ NULL
     ESS_tail = round(per_parameter[3L, ], 0),
     MCSE = round(mcse, 4),
     IAT = round(per_parameter[4L, ], 2),
+    IAT_n = round(per_parameter[4L, ] / n_param, 2),
     Rhat = round(per_parameter[5L, ], 3),
     row.names = NULL,
     stringsAsFactors = FALSE
@@ -284,6 +288,12 @@ NULL
 #'   sqrt(ESS)` and `IAT = N / ESS`, where `N` is the number of retained
 #'   draws. The IAT is the integrated autocorrelation time used by
 #'   Christen & Fox (2010) to compare samplers.
+#' * `IAT_n` is the IAT divided by the dimension `n` (the number of columns
+#'   of `samples`). Christen & Fox (2010, Section 4) found that for the
+#'   t-walk the IAT grows roughly linearly with the dimension, so `IAT_n`
+#'   stays bounded (below 15 in most of their examples) where common
+#'   Metropolis-Hastings samplers degrade. It is computed from the stored
+#'   draws, so with thinning it refers to the thinned chain.
 #' * `ESS_bulk` and `ESS_tail` are the rank-normalized bulk and tail
 #'   effective sample sizes.
 #' * `Rhat` is the rank-normalized split-R-hat (the maximum of its bulk and
@@ -292,6 +302,18 @@ NULL
 #'
 #' When chains have different lengths, ESS and R-hat use the first draws of
 #' each chain up to the length of the shortest one.
+#'
+#' @section Diagnostics for the t-walk:
+#' The t-walk is a reversible Metropolis-Hastings chain on the product space
+#' of the pair \eqn{(x, x')}, not on the space of \eqn{x} alone: the primary
+#' trajectory \eqn{x^{(t)}} returned in `samples` is not, by itself, a Markov
+#' chain. The diagnostics remain valid because each column of `samples` is a
+#' scalar function of the joint chain \eqn{(x^{(t)}, x'^{(t)})}, and the
+#' autocorrelation-based estimates (ESS, MCSE, IAT) and R-hat are applied to
+#' such one-dimensional functions one at a time. They should not be read as
+#' statements about \eqn{x^{(t)}} being a Markov chain, for example when
+#' combining it with methods that assume the Markov property of the
+#' sampled process itself.
 #'
 #' @param samples A matrix of MCMC samples (iterations x parameters), or a
 #'   list of matrices for multiple independent chains. For a list, burn-in is
@@ -302,7 +324,8 @@ NULL
 #' @param title Optional title for printed output.
 #'
 #' @return A data frame with posterior summaries, ESS (bulk and tail), MCSE,
-#'   IAT, and R-hat, returned invisibly after being printed.
+#'   IAT, IAT per dimension (`IAT_n`), and R-hat, returned invisibly after
+#'   being printed.
 #'
 #' @references
 #' Vehtari, A., Gelman, A., Simpson, D., Carpenter, B. and Buerkner, P.-C.

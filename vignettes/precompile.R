@@ -14,7 +14,8 @@ pkgload::load_all(".")
 old_wd <- setwd("vignettes")
 on.exit(setwd(old_wd))
 
-for (name in c("reproducing_christen_fox", "sampler_comparison")) {
+for (name in c("reproducing_christen_fox", "sampler_comparison",
+               "penalised_twalk")) {
   source_file <- paste0(name, ".Rmd.orig")
   if (file.exists(source_file)) {
     knitr::knit(source_file, paste0(name, ".Rmd"))

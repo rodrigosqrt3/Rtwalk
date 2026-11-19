@@ -203,7 +203,60 @@ twalk_move <- function(a, b, p_phi, aw, at, kernel) {
   list(h = h, n_phi = res$n_phi, log_hastings = hastings)
 }
 
+#' Draw the common shift of the penalised move
+#'
+#' Gradient-free penalised proposal of Medina-Aguayo & Christen (2022,
+#' Section 2.3), with the paper's default configuration (Section 3): centre
+#' \eqn{\mu = (x + x')/2}, scales \eqn{s = |x - x'|}, proposal \eqn{g} a
+#' multivariate t with 1 degree of freedom and scale \eqn{\kappa s}, and
+#' penalty \eqn{\varphi(w) = 1 - \rho(z)/\rho(0)}, where \eqn{\rho} is the
+#' multivariate t density with 2 degrees of freedom and
+#' \eqn{z = (w - \mu)/s}. A point \eqn{w} is drawn from the penalised
+#' density \eqn{g\varphi} by rejection (Algorithm 2) and the shift
+#' \eqn{w - \mu} is returned. Coordinates with \eqn{x_j = x'_j} have zero
+#' scale and are not moved; the dimension of \eqn{\rho} is the number of
+#' remaining coordinates.
+#'
+#' Since \eqn{(w - \mu_j)/s_j = \kappa z_j / |\zeta|} with \eqn{z_j, \zeta}
+#' standard normal, the penalty depends only on \eqn{z} and \eqn{\zeta}. Each
+#' trial draws \eqn{\zeta}, then \eqn{z} (all coordinates), then the uniform
+#' of the rejection step.
+#'
+#' @param x,xp The current two points.
+#' @param kappa Scale factor \eqn{\kappa} of the proposal relative to the
+#'   penalty.
+#' @return A list with the shift `delta` and the number of rejection-sampling
+#'   trials `n_trials` (0 when all coordinates have zero scale).
+#' @references Medina-Aguayo, F. J. and Christen, J. A. (2022). Penalised
+#'   t-walk MCMC. *Journal of Statistical Planning and Inference*, 221,
+#'   230--247. \doi{10.1016/j.jspi.2022.04.008}
+#' @keywords internal
+penalty_shift <- function(x, xp, kappa = 3) {
+  n_dim <- length(x)
+  scale <- abs(x - xp)
+  active <- scale > 0
+  n_active <- sum(active)
+  if (n_active == 0L) {
+    return(list(delta = numeric(n_dim), n_trials = 0L))
+  }
+
+  n_trials <- 0L
+  repeat {
+    n_trials <- n_trials + 1L
+    zeta <- stats::rnorm(1)
+    z <- stats::rnorm(n_dim)
+    omega <- stats::runif(1)
+    if (zeta == 0) next # nocov
+    q <- (kappa * kappa * sum(z[active] * z[active])) / (zeta * zeta)
+    phi <- 1 - exp(-(n_active + 2) / 2 * log1p(q / 2))
+    if (!(phi < omega)) break
+  }
+
+  list(delta = kappa * scale * z / abs(zeta), n_trials = n_trials)
+}
+
 .kernel_names <- c("traverse", "walk", "blow", "hop")
+.all_kernel_names <- c(.kernel_names, "penalty")
 
 .check_log_posterior_value <- function(value) {
   if (!is.numeric(value) || length(value) != 1L) {
@@ -225,8 +278,13 @@ twalk_move <- function(a, b, p_phi, aw, at, kernel) {
 # engine: `run()` may be interrupted by an error raised by the log posterior,
 # after which `pending()` is TRUE and `reject_pending()` completes the
 # iteration as a rejection.
+#
+# `cum_probs` holds the cumulative probabilities of the four t-walk moves,
+# already scaled by 1 - penalty_prob; the penalised move takes the remaining
+# interval [1 - penalty_prob, 1).
 .engine_r_new <- function(x0, xp0, lp_x0, lp_xp0, n_iter, thin, p_phi,
-                          aw, at, cum_probs, store_companion, names) {
+                          aw, at, cum_probs, store_companion, names,
+                          penalty_prob = 0, penalty_kappa = 3) {
   state <- new.env(parent = emptyenv())
   n_dim <- length(x0)
   n_store <- n_iter %/% thin
@@ -244,9 +302,9 @@ twalk_move <- function(a, b, p_phi, aw, at, kernel) {
     state$out_xp <- matrix(0, n_store, n_dim)
     state$out_lp_xp <- numeric(n_store)
   }
-  state$proposed <- integer(4)
-  state$accepted <- integer(4)
-  state$moved <- integer(4)
+  state$proposed <- integer(5)
+  state$accepted <- integer(5)
+  state$moved <- integer(5)
 
   store_iteration <- function() {
     state$iter <- state$iter + 1L
@@ -273,10 +331,63 @@ twalk_move <- function(a, b, p_phi, aw, at, kernel) {
     .check_log_posterior_value(value)
   }
 
+  # Penalised move (Medina-Aguayo & Christen, 2022, Algorithm 3). Both points
+  # are shifted by the same vector, by equation (5), or with their labels
+  # exchanged, by equation (6), when `swap` is TRUE. The shift preserves
+  # |x - x'|, so the proposal and penalty terms of the ratio (9) cancel and
+  # the acceptance ratio is pi(u) pi(v) / (pi(x) pi(x')).
+  penalty_step <- function(log_posterior, swap) {
+    state$proposed[5L] <- state$proposed[5L] + 1L
+    delta <- penalty_shift(state$x, state$xp, penalty_kappa)$delta
+    if (swap) {
+      new_x <- state$xp + delta
+      new_xp <- state$x + delta
+    } else {
+      new_x <- state$x + delta
+      new_xp <- state$xp + delta
+    }
+
+    alpha <- 0
+    lp_new_x <- state$lp_x
+    lp_new_xp <- state$lp_xp
+    if (all(new_x == state$x) && all(new_xp == state$xp)) {
+      alpha <- 1 # identity proposal (x = x'), no evaluation needed
+    } else if (all(is.finite(new_x)) && all(is.finite(new_xp))) {
+      lp_new_x <- evaluate(log_posterior, new_x)
+      if (is.finite(lp_new_x)) {
+        lp_new_xp <- evaluate(log_posterior, new_xp)
+        if (is.finite(lp_new_xp)) {
+          alpha <- acceptance_probability(
+            (lp_new_x + lp_new_xp) - (state$lp_x + state$lp_xp)
+          )
+        }
+      }
+    }
+
+    if (stats::runif(1) < alpha) {
+      changed <- any(new_x != state$x) || any(new_xp != state$xp)
+      state$x <- new_x
+      state$xp <- new_xp
+      state$lp_x <- lp_new_x
+      state$lp_xp <- lp_new_xp
+      state$accepted[5L] <- state$accepted[5L] + 1L
+      if (changed) state$moved[5L] <- state$moved[5L] + 1L
+    }
+
+    store_iteration()
+  }
+
   step <- function(log_posterior) {
     u_kernel <- stats::runif(1)
     kernel <- match(TRUE, u_kernel < cum_probs[1:3], nomatch = 4L)
+    if (kernel == 4L && penalty_prob > 0 && u_kernel >= 1 - penalty_prob) {
+      kernel <- 5L
+    }
     move_xp <- stats::runif(1) < 0.5
+
+    if (kernel == 5L) {
+      return(penalty_step(log_posterior, swap = move_xp))
+    }
 
     if (move_xp) {
       a <- state$xp
@@ -364,11 +475,13 @@ twalk_move <- function(a, b, p_phi, aw, at, kernel) {
 }
 
 .engine_cpp_new <- function(x0, xp0, lp_x0, lp_xp0, n_iter, thin, p_phi,
-                            aw, at, cum_probs, store_companion, names) {
+                            aw, at, cum_probs, store_companion, names,
+                            penalty_prob = 0, penalty_kappa = 3) {
   ptr <- twalk_engine_new(
     as.numeric(x0), as.numeric(xp0), lp_x0, lp_xp0,
     as.integer(n_iter), as.integer(thin), p_phi, aw, at,
-    as.numeric(cum_probs), store_companion, names
+    as.numeric(cum_probs), store_companion, names,
+    as.numeric(penalty_prob), as.numeric(penalty_kappa)
   )
 
   list(

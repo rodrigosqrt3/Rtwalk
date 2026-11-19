@@ -1,0 +1,571 @@
+---
+title: "The penalised t-walk"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{The penalised t-walk}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+
+
+> This vignette is precomputed: its code is run when the package is
+> developed, not when it is installed, because some experiments take a few
+> minutes. The full source is in `vignettes/penalised_twalk.Rmd.orig`.
+
+The four moves of the t-walk adapt to the scale and correlation of the
+target, but like most MCMC samplers the t-walk can get trapped in one mode
+when the modes are separated by regions of very low density. Medina-Aguayo
+and Christen proposed a fifth move for this situation:
+
+> Medina-Aguayo, F. J. and Christen, J. A. (2022). Penalised t-walk MCMC.
+> *Journal of Statistical Planning and Inference*, 221, 230--247.
+> <doi:10.1016/j.jspi.2022.04.008>
+
+Rtwalk implements the gradient-free version of the move (Section 2.3 of the
+paper), which needs nothing beyond the log posterior. It is off by default
+and is turned on with `twalk_control(penalty_prob = ...)`. This document
+explains the move, checks the implementation against the paper, and
+reproduces the paper's examples.
+
+
+``` r
+library(Rtwalk)
+```
+
+## 1. The move
+
+The t-walk keeps two points, $x$ and $x'$, and targets
+$\pi(x)\pi(x')$. The penalised move summarises the current pair by its
+midpoint $\mu = (x + x')/2$ and its coordinate-wise scale
+$s = |x - x'|$. It draws a new centre $w$ from a heavy-tailed distribution
+around $\mu$ whose density has been *penalised* near $\mu$, so that points
+far from the current location are favoured, and then shifts both points by
+the same vector:
+
+$$u = x + (w - \mu), \qquad v = x' + (w - \mu) \qquad \text{(equation 5)},$$
+
+or, with the labels exchanged, $u = x' + (w - \mu)$ and
+$v = x + (w - \mu)$ (equation 6). The existing four moves update only one
+of the two points at a time, which the authors note could leave them stuck
+in different modes; this move carries both together.
+
+The default configuration of the paper (Section 3), which Rtwalk uses, is:
+
+* the proposal $g$ is a multivariate $t$ distribution with 1 degree of
+  freedom, centre $\mu$ and scale $\kappa s$, with $\kappa = 3$;
+* the penalty is $\varphi(w) = 1 - \rho(z)/\rho(0)$, where $\rho$ is the
+  multivariate $t$ density with 2 degrees of freedom and
+  $z = (w - \mu)/s$. In $d$ dimensions this is
+  $\varphi(w) = 1 - (1 + \lVert z\rVert^2/2)^{-(d+2)/2}$, which is zero at
+  $\mu$ and tends to one far from it;
+* $w$ is drawn from the penalised density $g\varphi$ by rejection
+  (Algorithm 2): draw $w$ from $g$ and a uniform $\omega$, and keep $w$ if
+  $\omega \le \varphi(w)$.
+
+| Paper | Content | Rtwalk |
+|:------|:--------|:-------|
+| Sec. 2.3, Algorithm 2 | rejection sampler for $g\varphi$ | `penalty_shift()` |
+| Sec. 2.3, eqs. (5)--(6) | shift of both points, optional exchange | `penalty_step()` in the engines |
+| Sec. 2.3, eq. (9) | acceptance ratio | see below |
+| Sec. 3 | $\kappa = 3$, $t_1$ proposal, $t_2$ penalty | `twalk_control(penalty_kappa = 3)` |
+| Sec. 3, Example 2 | move used in about 10% of iterations | `twalk_control(penalty_prob = 0.1)` |
+
+### The acceptance ratio
+
+Equation (9) of the paper gives the Metropolis--Hastings ratio
+
+$$r = \frac{\pi(u)\,\pi(v)\; g(\mu_{xx'} \mid u, v)\; \varphi_{uv}(\mu_{xx'})}
+{\pi(x)\,\pi(x')\; g(w \mid x, x')\; \varphi_{xx'}(w)}.$$
+
+It simplifies. The shift preserves the difference between the two points,
+$|u - v| = |x - x'|$, so the scale is the same before and after the move,
+and the midpoint of $(u, v)$ is $w$. Since $g$ and $\rho$ are symmetric
+location-scale densities, the reverse proposal has the same density as the
+forward one: $g(\mu_{xx'} \mid u, v) = g(w \mid x, x')$ and
+$\varphi_{uv}(\mu_{xx'}) = \varphi_{xx'}(w)$. The normalising constants of
+the penalised proposals are equal too (Proposition 2 of the paper). Each
+of equations (5) and (6) is its own inverse, so choosing between them with
+a fixed probability (Rtwalk uses 1/2) keeps the move reversible. What
+remains is
+
+$$r = \frac{\pi(u)\,\pi(v)}{\pi(x)\,\pi(x')}.$$
+
+A penalised move therefore costs two evaluations of the log posterior
+(Rtwalk skips the second one when the first point falls outside the
+support), and no proposal density needs to be computed.
+
+Coordinates in which $x_j = x'_j$ have zero scale. They are left
+unchanged, and the dimension of $\rho$ is then the number of remaining
+coordinates; the move is still reversible because it preserves which
+coordinates are equal.
+
+## 2. The rejection sampler: Table 1 of the paper
+
+By Proposition 2 of the paper, the acceptance probability of the rejection
+step does not depend on the state; it is
+$Z = 1 - \rho(0)^{-1}\int g(w)\,\rho(\kappa w)\,dw$, and Table 1 reports it
+for several dimensions $d$ and values of $\kappa$. Since $Z$ is the mean of
+$\varphi$ under the proposal, it can be estimated precisely from draws of
+$g$ alone. With $z \sim N(0, I_d)$ and $\zeta \sim N(0, 1)$, a draw of the
+standardised proposal is $\kappa z/|\zeta|$:
+
+
+``` r
+penalty_rate <- function(d, kappa, n = 1e6) {
+  zeta <- rnorm(n)
+  q <- kappa^2 * rowSums(matrix(rnorm(n * d), n)^2) / zeta^2
+  mean(1 - (1 + q / 2)^(-(d + 2) / 2))
+}
+
+set.seed(1)
+paper <- rbind(
+  "d = 2" = c(0.8671, 0.9275, 0.9551),
+  "d = 4" = c(0.9802, 0.9931, 0.9970),
+  "d = 8" = c(0.9993, 0.9999, NA)
+)
+ours <- t(sapply(c(2, 4, 8), function(d) {
+  sapply(c(2, 3, 4), function(kappa) penalty_rate(d, kappa))
+}))
+dimnames(ours) <- dimnames(paper) <- list(rownames(paper), paste("kappa =", 2:4))
+round(paper, 4)
+#>       kappa = 2 kappa = 3 kappa = 4
+#> d = 2    0.8671    0.9275    0.9551
+#> d = 4    0.9802    0.9931    0.9970
+#> d = 8    0.9993    0.9999        NA
+round(ours, 4)
+#>       kappa = 2 kappa = 3 kappa = 4
+#> d = 2    0.8695    0.9268    0.9536
+#> d = 4    0.9791    0.9931    0.9971
+#> d = 8    0.9994    0.9999    1.0000
+```
+
+The two tables agree to the precision of the Monte Carlo estimates (the
+paper reports the entry for $d = 8$, $\kappa = 4$ only as
+$> 1 - 10^{-5}$). The same rate can be measured on the sampler itself,
+from the number of trials that `penalty_shift()` needs:
+
+
+``` r
+set.seed(2)
+trials <- vapply(seq_len(1e5), function(i) {
+  Rtwalk:::penalty_shift(c(0, 0), c(1, 1), kappa = 3)$n_trials
+}, integer(1))
+c(paper = 0.9275, sampler = 1e5 / sum(trials))
+#>     paper   sampler 
+#> 0.9275000 0.9269817
+```
+
+The distribution of the shift itself can be compared with the penalised
+density. In one dimension with scale 1 the shift has density proportional
+to a Cauchy density with scale $\kappa$ times
+$1 - (1 + t^2/2)^{-3/2}$:
+
+
+``` r
+set.seed(3)
+shifts <- vapply(seq_len(1e5), function(i) {
+  Rtwalk:::penalty_shift(0, 1, kappa = 3)$delta
+}, numeric(1))
+
+penalised <- function(t) dcauchy(t, scale = 3) * (1 - (1 + t^2 / 2)^(-3 / 2))
+# The histogram shows the draws in (-20, 20), so normalise over that range.
+z_const <- integrate(penalised, -20, 20)$value
+
+kept <- shifts[abs(shifts) < 20]
+hist(kept, breaks = 200, freq = FALSE, border = NA, col = "grey75",
+     main = "Shift of the penalised move (d = 1, scale 1)", xlab = "w - mu",
+     ylim = c(0, 0.09))
+curve(penalised(x) / z_const, add = TRUE, lwd = 2, col = "firebrick", n = 1001)
+legend("topright", c("draws", "penalised density"), bty = "n",
+       fill = c("grey75", NA), border = NA, lwd = c(NA, 2),
+       col = c(NA, "firebrick"))
+```
+
+<div class="figure">
+<img src="figures/penalised-shift-density-1.png" alt="plot of chunk shift-density" width="100%" />
+<p class="caption">plot of chunk shift-density</p>
+</div>
+
+The density vanishes at the current midpoint, so the move never proposes
+to stay where the pair is.
+
+## 3. Example 2: two well-separated modes
+
+Example 1 of the paper is a mixture of two bivariate Gaussians with very
+different shapes,
+
+$$\pi(x) = 0.5\,N(x \mid \mu_1, \Sigma_1) + 0.5\,N(x \mid \mu_2, \Sigma_2),$$
+
+with $\mu_1 = (0, 0)$, $\mu_2 = (20, -20)$, unit variances and correlation
+0.1 in $\Sigma_1$, and standard deviations 4 and 5 with correlation 0.8 in
+$\Sigma_2$. Example 2 runs the standard and the penalised t-walk on it for
+5 million iterations, with the penalised move in 10% of them.
+
+
+``` r
+mixture <- function(w) {
+  mu2 <- c(20, -20)
+  sigma1 <- matrix(c(1, 0.1, 0.1, 1), 2)
+  sigma2 <- matrix(c(16, 16, 16, 25), 2)
+  prec1 <- solve(sigma1)
+  prec2 <- solve(sigma2)
+  const1 <- log(w) - 0.5 * log(det(sigma1))
+  const2 <- log(1 - w) - 0.5 * log(det(sigma2))
+  function(x) {
+    d2 <- x - mu2
+    a <- const1 - 0.5 * sum(x * (prec1 %*% x))
+    b <- const2 - 0.5 * sum(d2 * (prec2 %*% d2))
+    m <- max(a, b)
+    m + log(exp(a - m) + exp(b - m))
+  }
+}
+log_example1 <- mixture(0.5)
+```
+
+To see how often each sampler leaves the first mode, we run 16 chains of 5
+million iterations each, all started as in the paper with both points near
+the first mode, and store every 10th iteration.
+
+
+``` r
+run_example2 <- function(penalty_prob) {
+  set.seed(2022)
+  start <- matrix(c(0, 0), 16, 2, byrow = TRUE)
+  twalk(log_example1, n_iter = 5e6, x0 = start, xp0 = start + 0.5,
+        n_chains = 16, n_cores = min(8, parallel::detectCores()), thin = 10,
+        show_progress = FALSE,
+        control = twalk_control(penalty_prob = penalty_prob,
+                                store_companion = FALSE))
+}
+standard <- run_example2(0)
+penalised <- run_example2(0.1)
+```
+
+
+``` r
+chain_stats <- function(fit) {
+  per_chain <- t(vapply(fit$individual_chains, function(chain) {
+    in_second <- chain$samples[, 1] > 10
+    c(reached = any(in_second), switches = sum(diff(in_second) != 0),
+      second = mean(in_second))
+  }, numeric(3)))
+  stats <- fit$kernel_statistics
+  c(
+    "chains that reach the second mode" = sum(per_chain[, "reached"]),
+    "median mode switches per chain" = stats::median(per_chain[, "switches"]),
+    "mean acceptance (%)" = 100 * fit$acceptance_rate,
+    "penalised move acceptance (%)" =
+      if (nrow(stats) == 5) 100 * stats$acceptance_rate[5] else NA,
+    "evaluations per iteration" = fit$n_evaluations / fit$total_iterations
+  )
+}
+round(cbind(standard = chain_stats(standard), penalised = chain_stats(penalised)), 2)
+#>                                   standard penalised
+#> chains that reach the second mode     9.00     16.00
+#> median mode switches per chain      268.00   1362.50
+#> mean acceptance (%)                  35.46     19.37
+#> penalised move acceptance (%)           NA      3.84
+#> evaluations per iteration             1.00      1.10
+```
+
+
+``` r
+op <- par(mfrow = c(2, 1), mar = c(4, 4, 2, 1))
+keep <- seq(1, 5e5, by = 50)
+for (name in c("standard", "penalised")) {
+  chain <- get(name)$individual_chains[[1]]
+  matplot(10 * keep, chain$samples[keep, ], type = "l", lty = 1,
+          col = c("steelblue", "darkorange"), xlab = "iteration", ylab = "x",
+          main = paste(name, "t-walk, chain 1"))
+}
+```
+
+<div class="figure">
+<img src="figures/penalised-example2-trace-1.png" alt="plot of chunk example2-trace" width="100%" />
+<p class="caption">plot of chunk example2-trace</p>
+</div>
+
+``` r
+par(op)
+```
+
+The penalised t-walk reaches the second mode in every chain and switches
+between the modes regularly. The global acceptance rate falls from about
+35% to 19%, and the penalised move is accepted about 4% of the time; the
+paper reports 33%, 16% and 3%. The paper does not give its seeds, the
+choice between equations (5) and (6) or the code of its implementation,
+so close but not exact agreement is what we expect.
+
+The standard t-walk does better here than in the paper, where it visits
+the second mode only three times in 5 million iterations (Figure 2, which
+compares it with the gradient-based penalty). Some of our standard
+chains reach the second mode, and some of them then switch often. The
+reason is the mechanism of the t-walk itself: the Traverse move sends one
+point past the other along the direction $x - x'$, so when the two points
+sit in different modes it can carry a point across the gap. What the standard t-walk
+cannot easily do is the first crossing, when both points are in the same
+mode and $|x - x'|$ is small compared with the distance between the modes.
+That is the situation the penalised move is designed for, since it
+proposes distances several times larger than $|x - x'|$ with a heavy
+tail.
+
+### Are the mode weights right?
+
+Switching modes is not enough: the chain must also spend the right
+fraction of time in each. This is hard to check on a single chain, because
+the switches are rare and the time between them varies a lot, and because
+chains started in one mode are biased towards it for a long time. The
+clean check removes the second problem: start each chain from exact draws
+of the target, so that it is stationary from the first iteration and the
+average time in each mode is an unbiased estimate of its weight, whatever
+the length of the chain.
+
+We use a version of the target with unequal weights, 0.3 and 0.7, and 64
+chains of a million iterations.
+
+
+``` r
+log_unequal <- mixture(0.3)
+draw_unequal <- function(n) {
+  second <- runif(n) > 0.3
+  z <- matrix(rnorm(2 * n), n)
+  x <- z %*% chol(matrix(c(1, 0.1, 0.1, 1), 2))
+  y <- sweep(z %*% chol(matrix(c(16, 16, 16, 25), 2)), 2, c(20, -20), "+")
+  x[second, ] <- y[second, ]
+  x
+}
+
+run_weights <- function(penalty_prob) {
+  set.seed(64)
+  fit <- twalk(log_unequal, n_iter = 1e6, x0 = draw_unequal(64),
+               xp0 = draw_unequal(64), n_chains = 64,
+               n_cores = min(8, parallel::detectCores()), thin = 10,
+               show_progress = FALSE,
+               control = twalk_control(penalty_prob = penalty_prob,
+                                       store_companion = FALSE))
+  vapply(fit$individual_chains, function(chain) {
+    mean(chain$samples[, 1] > 10)
+  }, numeric(1))
+}
+fraction <- sapply(c(standard = 0, penalised = 0.1), run_weights)
+rbind(exact = 0.7, mean = colMeans(fraction),
+      std_error = apply(fraction, 2, sd) / sqrt(64))
+#>            standard  penalised
+#> exact     0.7000000 0.70000000
+#> mean      0.7203787 0.70860937
+#> std_error 0.0352032 0.02316482
+```
+
+
+``` r
+hist(fraction[, "penalised"], breaks = 20, col = "grey75", border = "white",
+     main = "Penalised t-walk: time in the second mode, 64 chains",
+     xlab = "fraction")
+abline(v = 0.7, col = "firebrick", lwd = 2)
+```
+
+<div class="figure">
+<img src="figures/penalised-weights-hist-1.png" alt="plot of chunk weights-hist" width="100%" />
+<p class="caption">plot of chunk weights-hist</p>
+</div>
+
+Both samplers estimate the weight without bias, as they should: each one
+leaves the target invariant, and started from the target each one stays
+there. This is the check that the penalised move is correct. The
+difference between them is the precision: the penalised chains vary less
+from one to another, so the standard error of their average is smaller.
+
+In practice chains do not start from the target. Started in one mode,
+they are biased towards it until they have switched modes many times; for
+the standard t-walk, in Example 2, some chains never switched at all. On a
+multimodal target, run several chains from dispersed starting points and
+compare them before trusting the estimated weights.
+
+## 4. Example 3: nine modes in three dimensions
+
+Example 3 is a mixture of nine spherical Gaussians in three dimensions:
+eight centred at the vertices of the cube $\{-10, 10\}^3$ and one at
+$(30, 30, 30)$ with variance 10. The paper says only that the variances of
+the first eight "range from 0.25 to 10", so we space them evenly in that
+range. All components have the same weight.
+
+
+``` r
+centres <- rbind(as.matrix(expand.grid(c(10, -10), c(10, -10), c(10, -10))),
+                 c(30, 30, 30))
+variances <- c(seq(0.25, 10, length.out = 8), 10)
+log_example3 <- function(x) {
+  a <- -1.5 * log(2 * pi * variances) -
+    0.5 * colSums((t(centres) - x)^2) / variances
+  m <- max(a)
+  m + log(sum(exp(a - m)))
+}
+nearest_mode <- function(samples) {
+  apply(samples, 1, function(x) which.min(colSums((t(centres) - x)^2)))
+}
+
+run_example3 <- function(penalty_prob) {
+  set.seed(3)
+  twalk(log_example3, n_iter = 1e6, x0 = c(10, 10, 10), xp0 = c(10.5, 10.5, 10.5),
+        show_progress = FALSE,
+        control = twalk_control(penalty_prob = penalty_prob,
+                                store_companion = FALSE))
+}
+example3 <- lapply(c(standard = 0, penalised = 0.1), run_example3)
+
+occupancy <- sapply(example3, function(fit) {
+  modes <- nearest_mode(fit$samples[seq(1, 1e6, by = 10), ])
+  tabulate(modes, 9) / length(modes)
+})
+rownames(occupancy) <- paste("mode", 1:9)
+round(rbind(occupancy, "acceptance" = sapply(example3, `[[`, "acceptance_rate")), 3)
+#>            standard penalised
+#> mode 1        1.000     0.145
+#> mode 2        0.000     0.139
+#> mode 3        0.000     0.102
+#> mode 4        0.000     0.136
+#> mode 5        0.000     0.115
+#> mode 6        0.000     0.118
+#> mode 7        0.000     0.103
+#> mode 8        0.000     0.084
+#> mode 9        0.000     0.058
+#> acceptance    0.326     0.046
+```
+
+The standard t-walk stays in the mode where it starts. The penalised
+t-walk visits all nine within the first million iterations, as in the
+paper, with a global acceptance of about 5% (the paper reports 4%). Each
+mode has weight 1/9 = 0.111; one million iterations are not enough to
+estimate these weights precisely, which matches the paper's remark that
+convergence is slow but the method at least exposes the multimodality.
+
+## 5. Example 4: a mixture of bananas in ten dimensions
+
+Example 4 is a mixture of three "banana-shaped" distributions in ten
+dimensions,
+$\pi(x) \propto \sum_{i=1}^{3} N(\phi_{b_i}(x) \mid \mu_i, \Sigma)$, with
+$\mu_i$ equal to $-3$, $0$ and $3$ in every coordinate, $b = (-0.03, 0, 0.03)$
+and $\Sigma = \mathrm{diag}(100, 1, \ldots, 1)$. The paper prints the
+transformation as $\phi_b(x) = (x_1 + b x_1^2 - 100b, x_2, \ldots, x_d)$;
+we use the usual banana transformation of Haario et al.,
+$\phi_b(x) = (x_1, x_2 + b x_1^2 - 100b, x_3, \ldots, x_d)$, which bends
+the second coordinate and has unit Jacobian. With it the acceptance rates
+match those of the paper closely.
+
+
+``` r
+bend <- c(-0.03, 0, 0.03)
+centre <- c(-3, 0, 3)
+log_example4 <- function(x) {
+  a <- vapply(1:3, function(i) {
+    y <- x
+    y[2] <- x[2] + bend[i] * x[1]^2 - 100 * bend[i]
+    -0.5 * ((y[1] - centre[i])^2 / 100 + sum((y[-1] - centre[i])^2))
+  }, numeric(1))
+  m <- max(a)
+  m + log(sum(exp(a - m)))
+}
+
+run_example4 <- function(penalty_prob) {
+  set.seed(4)
+  twalk(log_example4, n_iter = 1e6, x0 = rep(0, 10), xp0 = rep(0.5, 10),
+        show_progress = FALSE,
+        control = twalk_control(penalty_prob = penalty_prob,
+                                store_companion = FALSE))
+}
+example4 <- lapply(c(standard = 0, penalised = 0.1), run_example4)
+
+iat <- function(fit) {
+  lp <- fit$log_posterior[-(1:1e5)]
+  length(lp) / coda::effectiveSize(lp)
+}
+penalty_acceptance <- example4$penalised$kernel_statistics$acceptance_rate[5]
+rbind(
+  "acceptance, paper (%)" = c(13, 10),
+  "acceptance, Rtwalk (%)" = round(100 * sapply(example4, `[[`, "acceptance_rate"), 1),
+  "IAT of log posterior, paper" = c(630, 578),
+  "IAT of log posterior, Rtwalk" = round(sapply(example4, iat))
+)
+#>                              standard penalised
+#> acceptance, paper (%)            13.0      10.0
+#> acceptance, Rtwalk (%)           13.7      11.1
+#> IAT of log posterior, paper     630.0     578.0
+#> IAT of log posterior, Rtwalk    354.0     328.0
+c("penalised move acceptance (%), paper" = 0.3,
+  "penalised move acceptance (%), Rtwalk" = round(100 * penalty_acceptance, 3))
+#>  penalised move acceptance (%), paper penalised move acceptance (%), Rtwalk 
+#>                                 0.300                                 0.025
+```
+
+The modes overlap here, so the standard t-walk already explores the
+target and the penalised move is almost never accepted. The paper
+concludes that the benefit in this example is minimal but the move does
+not interfere. We find the same acceptance rates, and the IATs with and
+without the move are similar, as in the paper; the penalised move is
+accepted even less often than there. Our IATs are about half of the
+paper's, which does not say which quantity its IAT refers to (we report
+that of the log posterior) or how long its chains were.
+
+## 6. What is not reproduced
+
+* **The gradient-based penalty (Section 2.2, Example 1, Figure 2).** It
+  needs the gradient of the log posterior, which the t-walk does not use.
+* **Combining samples from different modes (Section 4).** This is an
+  approximate post-processing step based on kernel density estimates, not
+  a move of the sampler.
+* **The radiocarbon example (Section 5).** It uses a Python implementation
+  of Bacon on the core LL14, whose data are not public.
+
+## 7. Using the move in practice
+
+
+``` r
+fit <- twalk(log_post, n_iter = 1e6, x0 = x0, xp0 = xp0, n_chains = 4,
+             control = twalk_control(penalty_prob = 0.1))
+fit$kernel_statistics
+```
+
+* The move is useful when the target has well-separated modes. When it
+  does not, it is accepted very rarely and only adds cost.
+* Each penalised move costs two evaluations of the log posterior, so
+  `penalty_prob = 0.1` raises the cost by about 10%.
+* Jumps between modes are rare events. Run long chains, use several chains
+  with dispersed starting points, and compare them before trusting the
+  estimated mode weights.
+* `penalty_kappa` sets how far the move reaches. The paper notes that the
+  rejection step becomes nearly free as the dimension grows (Table 1) and
+  suggests that $\kappa$ could be scaled with the dimension.
+
+
+``` r
+sessionInfo()
+#> R version 4.6.2 (2026-10-29 ucrt)
+#> Platform: x86_64-w64-mingw32/x64
+#> Running under: Windows 11 x64 (build 26300)
+#> 
+#> Matrix products: default
+#>   LAPACK version 3.12.1
+#> 
+#> locale:
+#> [1] LC_COLLATE=Portuguese_Brazil.utf8  LC_CTYPE=Portuguese_Brazil.utf8   
+#> [3] LC_MONETARY=Portuguese_Brazil.utf8 LC_NUMERIC=C                      
+#> [5] LC_TIME=Portuguese_Brazil.utf8    
+#> 
+#> time zone: America/Sao_Paulo
+#> tzcode source: internal
+#> 
+#> attached base packages:
+#> [1] stats     graphics  grDevices utils     datasets  methods   base     
+#> 
+#> other attached packages:
+#> [1] Rtwalk_2.3.0   testthat_3.3.2
+#> 
+#> loaded via a namespace (and not attached):
+#>  [1] digest_0.6.39    desc_1.4.3       R6_2.6.1         codetools_0.2-20
+#>  [5] xfun_0.62        lattice_0.23-1   magrittr_2.0.5   coda_0.19-4.1   
+#>  [9] knitr_1.52       parallel_4.6.2   lifecycle_1.0.5  cli_3.6.6       
+#> [13] grid_4.6.2       pkgload_1.5.3    compiler_4.6.2   rprojroot_2.1.1 
+#> [17] tools_4.6.2      pkgbuild_1.4.8   brio_1.1.5       evaluate_1.0.5  
+#> [21] Rcpp_1.1.2       otel_0.3.0       rlang_1.3.0
+```

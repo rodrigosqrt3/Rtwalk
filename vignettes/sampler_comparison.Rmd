@@ -94,7 +94,7 @@ independent of all the samplers compared.
 
 
 The full benchmark (180 runs plus a scaling experiment) took
-9.5 minutes on a laptop. The importance
+5.8 minutes on a laptop. The importance
 sampling reference for the logistic regression had a relative effective
 sample size of 66%, so its moments are
 accurate to well below the Monte Carlo error of any sampler.
@@ -237,12 +237,12 @@ measure.
 
 |                      | t-walk| RWM naive| RWM oracle|  AM| Ensemble| Slice|
 |:---------------------|------:|---------:|----------:|---:|--------:|-----:|
-|Correlated Gaussian   |     17|         2|       2119| 508|      296|    14|
-|Badly scaled Gaussian |   1315|         2|       3465| 374|      280|     9|
-|Rosenbrock            |    105|         7|        321|  47|        7|    17|
-|Bimodal mixture       |     51|       145|       2109| 473|       18|   906|
-|Neal's funnel         |     47|        51|         15|  13|       93|    45|
-|Logistic regression   |     64|         1|        561| 277|       92|   168|
+|Correlated Gaussian   |     26|         5|       4527| 834|      548|    30|
+|Badly scaled Gaussian |   1623|         3|       5221| 513|      427|    15|
+|Rosenbrock            |    127|        15|        670|  78|       11|    29|
+|Bimodal mixture       |     69|       236|       2664| 629|       24|  1271|
+|Neal's funnel         |     58|        75|         28|  21|      164|    74|
+|Logistic regression   |     91|         1|        803| 449|      140|   237|
 
 
 

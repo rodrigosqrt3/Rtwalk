@@ -11,8 +11,8 @@ Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
 // twalk_engine_new
-SEXP twalk_engine_new(NumericVector x0, NumericVector xp0, double lp_x0, double lp_xp0, int n_iter, int thin, double p_phi, double aw, double at, NumericVector cum_probs, bool store_companion, SEXP names);
-RcppExport SEXP _Rtwalk_twalk_engine_new(SEXP x0SEXP, SEXP xp0SEXP, SEXP lp_x0SEXP, SEXP lp_xp0SEXP, SEXP n_iterSEXP, SEXP thinSEXP, SEXP p_phiSEXP, SEXP awSEXP, SEXP atSEXP, SEXP cum_probsSEXP, SEXP store_companionSEXP, SEXP namesSEXP) {
+SEXP twalk_engine_new(NumericVector x0, NumericVector xp0, double lp_x0, double lp_xp0, int n_iter, int thin, double p_phi, double aw, double at, NumericVector cum_probs, bool store_companion, SEXP names, double penalty_prob, double penalty_kappa);
+RcppExport SEXP _Rtwalk_twalk_engine_new(SEXP x0SEXP, SEXP xp0SEXP, SEXP lp_x0SEXP, SEXP lp_xp0SEXP, SEXP n_iterSEXP, SEXP thinSEXP, SEXP p_phiSEXP, SEXP awSEXP, SEXP atSEXP, SEXP cum_probsSEXP, SEXP store_companionSEXP, SEXP namesSEXP, SEXP penalty_probSEXP, SEXP penalty_kappaSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -28,7 +28,9 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< NumericVector >::type cum_probs(cum_probsSEXP);
     Rcpp::traits::input_parameter< bool >::type store_companion(store_companionSEXP);
     Rcpp::traits::input_parameter< SEXP >::type names(namesSEXP);
-    rcpp_result_gen = Rcpp::wrap(twalk_engine_new(x0, xp0, lp_x0, lp_xp0, n_iter, thin, p_phi, aw, at, cum_probs, store_companion, names));
+    Rcpp::traits::input_parameter< double >::type penalty_prob(penalty_probSEXP);
+    Rcpp::traits::input_parameter< double >::type penalty_kappa(penalty_kappaSEXP);
+    rcpp_result_gen = Rcpp::wrap(twalk_engine_new(x0, xp0, lp_x0, lp_xp0, n_iter, thin, p_phi, aw, at, cum_probs, store_companion, names, penalty_prob, penalty_kappa));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -91,7 +93,7 @@ END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
-    {"_Rtwalk_twalk_engine_new", (DL_FUNC) &_Rtwalk_twalk_engine_new, 12},
+    {"_Rtwalk_twalk_engine_new", (DL_FUNC) &_Rtwalk_twalk_engine_new, 14},
     {"_Rtwalk_twalk_engine_run", (DL_FUNC) &_Rtwalk_twalk_engine_run, 3},
     {"_Rtwalk_twalk_engine_reject_pending", (DL_FUNC) &_Rtwalk_twalk_engine_reject_pending, 1},
     {"_Rtwalk_twalk_engine_pending", (DL_FUNC) &_Rtwalk_twalk_engine_pending, 1},

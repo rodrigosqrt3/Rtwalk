@@ -335,7 +335,8 @@ paper), or $2.38/\sqrt{10}$ for every $n$ ("fixed scaling", dotted lines). The
 same RWM is applied to all models, while the t-walk is used with its
 defaults. We start both samplers at draws from the target, discard 10% of
 each run as burn-in, and estimate the IAT with Geyer's initial monotone
-sequence (`calculate_diagnostics()` reports it as `IAT`).
+sequence (`calculate_diagnostics()` reports it as `IAT`, and the ratio to the
+dimension as `IAT_n`).
 
 ```{r fig5-run}
 rwm_x1 <- function(log_target, x0, step_sd, n_iter) {

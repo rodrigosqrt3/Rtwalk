@@ -38,5 +38,10 @@ Useful links:
 \author{
 \strong{Maintainer}: Rodrigo Fonseca Villa \email{rodrigo03.villa@gmail.com} (\href{https://orcid.org/0009-0005-2938-2270}{ORCID})
 
+Authors:
+\itemize{
+  \item Rodrigo Fonseca Villa \email{rodrigo03.villa@gmail.com} (\href{https://orcid.org/0009-0005-2938-2270}{ORCID})
+}
+
 }
 \keyword{internal}

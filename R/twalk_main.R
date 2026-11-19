@@ -43,6 +43,15 @@
 #' @param kernel_probs Probabilities of choosing the Traverse, Walk, Blow and
 #'   Hop moves, in this order (or named). They are normalized to sum to one.
 #'   The defaults correspond to the move ratios 60:60:1:1.
+#' @param penalty_prob Probability of the penalised move of Medina-Aguayo &
+#'   Christen (2022), a fifth move for multimodal targets (see the section
+#'   below). It must lie in `[0, 1)`; the four moves above are chosen with
+#'   probabilities `(1 - penalty_prob) * kernel_probs`. The default, 0,
+#'   gives the original t-walk, and the chains are then identical to those
+#'   of earlier versions of the package.
+#' @param penalty_kappa Scale of the penalised proposal relative to the
+#'   penalty, \eqn{\kappa > 0}. The default, 3, is the value used by
+#'   Medina-Aguayo & Christen (2022).
 #' @param store_companion Logical; whether to store the trajectory of the
 #'   companion point `x'`. Setting it to `FALSE` halves the memory used by
 #'   the output.
@@ -50,21 +59,46 @@
 #'   much slower pure-R reference implementation that produces identical
 #'   chains and is used to validate the compiled engine.
 #'
+#' @section Penalised move:
+#' The four moves of the t-walk may fail to cross regions of very low
+#' density between modes. The penalised move of Medina-Aguayo & Christen
+#' (2022, Section 2.3, without gradients) proposes to shift both points by
+#' the same vector \eqn{w - \mu}, where \eqn{\mu = (x + x')/2} and \eqn{w} is
+#' drawn from a heavy-tailed distribution centred at \eqn{\mu} whose density
+#' is penalised (set to zero) at \eqn{\mu}, so that distant points are
+#' favoured. The scale in each coordinate is \eqn{|x_j - x'_j|}. With
+#' probability 1/2 the two points also exchange labels (equations 5 and 6 of
+#' the paper). Because the shift preserves \eqn{|x - x'|}, the move is
+#' accepted with probability
+#' \eqn{\min\{1, \pi(u)\pi(v) / (\pi(x)\pi(x'))\}}, where \eqn{(u, v)} is the
+#' proposed pair. Each penalised move costs two evaluations of the log
+#' posterior, and its acceptance rate is typically low; its purpose is to
+#' let the chain jump between modes, not to explore within them. The paper
+#' uses the move in about 10% of the iterations (`penalty_prob = 0.1`).
+#'
 #' @return An object of class `twalk_control`.
 #'
 #' @references Christen, J. A. and Fox, C. (2010). A general purpose sampling
 #'   algorithm for continuous distributions (the t-walk). *Bayesian Analysis*,
 #'   5(2), 263--282. \doi{10.1214/10-BA603}
 #'
+#' Medina-Aguayo, F. J. and Christen, J. A. (2022). Penalised t-walk MCMC.
+#'   *Journal of Statistical Planning and Inference*, 221, 230--247.
+#'   \doi{10.1016/j.jspi.2022.04.008}
+#'
 #' @examples
 #' twalk_control()
 #'
 #' # A sensitivity study on the Walk-move parameter
 #' twalk_control(aw = 0.5)
+#'
+#' # The penalised t-walk for multimodal targets
+#' twalk_control(penalty_prob = 0.1)
 #' @export
 twalk_control <- function(n1 = 4, aw = 1.5, at = 6,
                           kernel_probs = c(traverse = 0.4918, walk = 0.4918,
                                            blow = 0.0082, hop = 0.0082),
+                          penalty_prob = 0, penalty_kappa = 3,
                           store_companion = TRUE,
                           engine = c("cpp", "R")) {
   is_number <- function(x) is.numeric(x) && length(x) == 1L && is.finite(x)
@@ -95,6 +129,12 @@ twalk_control <- function(n1 = 4, aw = 1.5, at = 6,
     }
     kernel_probs <- kernel_probs[.kernel_names]
   }
+  if (!is_number(penalty_prob) || penalty_prob < 0 || penalty_prob >= 1) {
+    stop("`penalty_prob` must be one number in [0, 1).", call. = FALSE)
+  }
+  if (!is_number(penalty_kappa) || penalty_kappa <= 0) {
+    stop("`penalty_kappa` must be one positive number.", call. = FALSE)
+  }
   if (!is.logical(store_companion) || length(store_companion) != 1L ||
       is.na(store_companion)) {
     stop("`store_companion` must be TRUE or FALSE.", call. = FALSE)
@@ -111,11 +151,27 @@ twalk_control <- function(n1 = 4, aw = 1.5, at = 6,
       aw = aw,
       at = at,
       kernel_probs = kernel_probs,
+      penalty_prob = penalty_prob,
+      penalty_kappa = penalty_kappa,
       store_companion = store_companion,
       engine = match.arg(engine)
     ),
     class = "twalk_control"
   )
+}
+
+# Penalised-move settings; controls created by versions before 2.3.0 have
+# none and correspond to the original t-walk.
+.penalty_settings <- function(control) {
+  list(
+    prob = if (is.null(control$penalty_prob)) 0 else control$penalty_prob,
+    kappa = if (is.null(control$penalty_kappa)) 3 else control$penalty_kappa
+  )
+}
+
+# Kernels reported in the output: the penalised move only when it is used.
+.kernel_labels <- function(control) {
+  if (.penalty_settings(control)$prob > 0) .all_kernel_names else .kernel_names
 }
 
 #' @export
@@ -128,6 +184,11 @@ print.twalk_control <- function(x, ...) {
           collapse = ", "),
     "\n"
   )
+  penalty <- .penalty_settings(x)
+  if (penalty$prob > 0) {
+    cat(sprintf("  penalised move: probability = %g, kappa = %g\n",
+                penalty$prob, penalty$kappa))
+  }
   cat("  store companion:", x$store_companion, "\n")
   cat("  engine:", x$engine, "\n")
   invisible(x)
@@ -186,15 +247,18 @@ print.twalk_control <- function(x, ...) {
     }
   }
 
+  penalty <- .penalty_settings(control)
   engine_new <- if (identical(control$engine, "R")) .engine_r_new else .engine_cpp_new
   engine <- engine_new(
     x0 = x0, xp0 = xp0, lp_x0 = lp0[[1L]], lp_xp0 = lp0[[2L]],
     n_iter = n_iter, thin = thin,
     p_phi = min(n_dim, control$n1) / n_dim,
     aw = control$aw, at = control$at,
-    cum_probs = cumsum(control$kernel_probs),
+    cum_probs = cumsum(control$kernel_probs) * (1 - penalty$prob),
     store_companion = control$store_companion,
-    names = param_names
+    names = param_names,
+    penalty_prob = penalty$prob,
+    penalty_kappa = penalty$kappa
   )
 
   if (show_progress) {
@@ -251,9 +315,11 @@ print.twalk_control <- function(x, ...) {
     names(res$xp) <- param_names
   }
 
-  proposed <- stats::setNames(res$proposed, .kernel_names)
-  accepted <- stats::setNames(res$accepted, .kernel_names)
-  moved <- stats::setNames(res$moved, .kernel_names)
+  labels <- .kernel_labels(control)
+  kernels <- seq_along(labels)
+  proposed <- stats::setNames(res$proposed[kernels], labels)
+  accepted <- stats::setNames(res$accepted[kernels], labels)
+  moved <- stats::setNames(res$moved[kernels], labels)
   denominator <- max(iterations, 1L)
 
   structure(
@@ -476,6 +542,7 @@ print.twalk_control <- function(x, ...) {
 
   iterations <- vapply(results, `[[`, numeric(1), "n_iter")
   errors <- unlist(lapply(results, `[[`, "first_error"))
+  labels <- results[[1L]]$kernel_statistics$kernel
 
   structure(
     list(
@@ -487,9 +554,9 @@ print.twalk_control <- function(x, ...) {
       move_rate = mean(vapply(results, `[[`, numeric(1), "move_rate")),
       no_move_rate = mean(vapply(results, `[[`, numeric(1), "no_move_rate")),
       kernel_statistics = .summarize_kernel_counts(
-        stats::setNames(sum_counts("proposed"), .kernel_names),
-        stats::setNames(sum_counts("accepted"), .kernel_names),
-        stats::setNames(sum_counts("moved"), .kernel_names)
+        stats::setNames(sum_counts("proposed"), labels),
+        stats::setNames(sum_counts("accepted"), labels),
+        stats::setNames(sum_counts("moved"), labels)
       ),
       n_iter = results[[1L]]$n_iter,
       thin = results[[1L]]$thin,
@@ -876,15 +943,16 @@ twalk <- function(log_posterior, n_iter, x0, xp0,
   counts <- function(field) {
     old$kernel_statistics[[field]] + new$kernel_statistics[[field]]
   }
-  accepted <- stats::setNames(counts("accepted"), .kernel_names)
-  moved <- stats::setNames(counts("moved"), .kernel_names)
+  labels <- new$kernel_statistics$kernel
+  accepted <- stats::setNames(counts("accepted"), labels)
+  moved <- stats::setNames(counts("moved"), labels)
 
   new$samples <- bind(old$samples, new$samples)
   new$companion_samples <- bind(old$companion_samples, new$companion_samples)
   new$log_posterior <- bind(old$log_posterior, new$log_posterior)
   new$companion_log_posterior <- bind(old$companion_log_posterior, new$companion_log_posterior)
   new$kernel_statistics <- .summarize_kernel_counts(
-    stats::setNames(counts("proposed"), .kernel_names), accepted, moved
+    stats::setNames(counts("proposed"), labels), accepted, moved
   )
   new$acceptance_rate <- sum(accepted) / iterations
   new$move_rate <- sum(moved) / iterations

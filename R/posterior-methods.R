@@ -52,7 +52,7 @@ NULL
   variables <- colnames(chains[[1L]])
   default_names <- paste0("theta", seq_len(n_param - has_log_post))
   if (is.null(variables)) {
-    variables <- c(default_names, if (has_log_post) "lp__")
+    variables <- c(default_names, "lp__")[seq_len(n_param)]
   } else {
     missing_names <- is.na(variables) | variables == ""
     variables[missing_names] <- default_names[missing_names]

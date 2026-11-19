@@ -9,6 +9,8 @@ twalk_control(
   aw = 1.5,
   at = 6,
   kernel_probs = c(traverse = 0.4918, walk = 0.4918, blow = 0.0082, hop = 0.0082),
+  penalty_prob = 0,
+  penalty_kappa = 3,
   store_companion = TRUE,
   engine = c("cpp", "R")
 )
@@ -28,6 +30,17 @@ explored \verb{[2, 10]}.}
 Hop moves, in this order (or named). They are normalized to sum to one.
 The defaults correspond to the move ratios 60:60:1:1.}
 
+\item{penalty_prob}{Probability of the penalised move of Medina-Aguayo &
+Christen (2022), a fifth move for multimodal targets (see the section
+below). It must lie in \verb{[0, 1)}; the four moves above are chosen with
+probabilities \code{(1 - penalty_prob) * kernel_probs}. The default, 0,
+gives the original t-walk, and the chains are then identical to those
+of earlier versions of the package.}
+
+\item{penalty_kappa}{Scale of the penalised proposal relative to the
+penalty, \eqn{\kappa > 0}. The default, 3, is the value used by
+Medina-Aguayo & Christen (2022).}
+
 \item{store_companion}{Logical; whether to store the trajectory of the
 companion point \verb{x'}. Setting it to \code{FALSE} halves the memory used by
 the output.}
@@ -46,14 +59,40 @@ integrated autocorrelation times over a wide range of targets; the authors'
 intention is that they are left unchanged. Changing them is mainly useful
 for sensitivity studies.
 }
+\section{Penalised move}{
+
+The four moves of the t-walk may fail to cross regions of very low
+density between modes. The penalised move of Medina-Aguayo & Christen
+(2022, Section 2.3, without gradients) proposes to shift both points by
+the same vector \eqn{w - \mu}, where \eqn{\mu = (x + x')/2} and \eqn{w} is
+drawn from a heavy-tailed distribution centred at \eqn{\mu} whose density
+is penalised (set to zero) at \eqn{\mu}, so that distant points are
+favoured. The scale in each coordinate is \eqn{|x_j - x'_j|}. With
+probability 1/2 the two points also exchange labels (equations 5 and 6 of
+the paper). Because the shift preserves \eqn{|x - x'|}, the move is
+accepted with probability
+\eqn{\min\{1, \pi(u)\pi(v) / (\pi(x)\pi(x'))\}}, where \eqn{(u, v)} is the
+proposed pair. Each penalised move costs two evaluations of the log
+posterior, and its acceptance rate is typically low; its purpose is to
+let the chain jump between modes, not to explore within them. The paper
+uses the move in about 10\% of the iterations (\code{penalty_prob = 0.1}).
+}
+
 \examples{
 twalk_control()
 
 # A sensitivity study on the Walk-move parameter
 twalk_control(aw = 0.5)
+
+# The penalised t-walk for multimodal targets
+twalk_control(penalty_prob = 0.1)
 }
 \references{
 Christen, J. A. and Fox, C. (2010). A general purpose sampling
 algorithm for continuous distributions (the t-walk). \emph{Bayesian Analysis},
 5(2), 263--282. \doi{10.1214/10-BA603}
+
+Medina-Aguayo, F. J. and Christen, J. A. (2022). Penalised t-walk MCMC.
+\emph{Journal of Statistical Planning and Inference}, 221, 230--247.
+\doi{10.1016/j.jspi.2022.04.008}
 }

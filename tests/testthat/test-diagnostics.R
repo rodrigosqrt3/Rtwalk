@@ -11,9 +11,11 @@ test_that("calculate_diagnostics works with default and custom parameter names",
     res1,
     c(
       "Parameter", "Mean", "SD", "Q2.5", "Median", "Q97.5",
-      "ESS", "ESS_bulk", "ESS_tail", "MCSE", "IAT", "Rhat"
+      "ESS", "ESS_bulk", "ESS_tail", "MCSE", "IAT", "IAT_n", "Rhat"
     )
   )
+  # IAT_n is the IAT divided by the dimension
+  expect_equal(res1$IAT_n, round(res1$IAT / 2, 2), tolerance = 0.01)
   # Split-R-hat is defined for a single chain
   expect_true(all(is.finite(res1$Rhat)))
   expect_true(all(res1$Rhat < 1.1))
@@ -76,12 +78,27 @@ test_that("diagnostics agree with the posterior package", {
     discrete = matrix(rpois(600, 3), ncol = 3)
   )
 
-  for (draws in scenarios) {
+  # posterior 1.8.0 changed the upper-tail indicator to x >= q, which only
+  # matters with ties; compare tail ESS on discrete draws only from there on.
+  new_tail_rule <- utils::packageVersion("posterior") >= "1.8.0"
+
+  for (name in names(scenarios)) {
+    draws <- scenarios[[name]]
     expect_equal(.ess_basic(draws), suppressWarnings(posterior::ess_basic(draws)))
     expect_equal(.ess_bulk(draws), suppressWarnings(posterior::ess_bulk(draws)))
-    expect_equal(.ess_tail(draws), suppressWarnings(posterior::ess_tail(draws)))
+    if (name != "discrete" || new_tail_rule) {
+      expect_equal(.ess_tail(draws), suppressWarnings(posterior::ess_tail(draws)))
+    }
     expect_equal(.rhat_rank(draws), posterior::rhat(draws))
   }
+})
+
+test_that("tail ESS is symmetric under sign change, also with ties", {
+  set.seed(7)
+  discrete <- matrix(rpois(600, 3), ncol = 3)
+  continuous <- matrix(rnorm(600), ncol = 2)
+  expect_equal(.ess_tail(discrete), .ess_tail(-discrete))
+  expect_equal(.ess_tail(continuous), .ess_tail(-continuous))
 })
 
 test_that("integrated autocorrelation time matches an AR(1) process", {

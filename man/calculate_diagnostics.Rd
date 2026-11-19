@@ -25,7 +25,8 @@ default, the column names of \code{samples} are used, if any.}
 }
 \value{
 A data frame with posterior summaries, ESS (bulk and tail), MCSE,
-IAT, and R-hat, returned invisibly after being printed.
+IAT, IAT per dimension (\code{IAT_n}), and R-hat, returned invisibly after
+being printed.
 }
 \description{
 Computes posterior summaries, effective sample sizes, Monte Carlo standard
@@ -40,6 +41,12 @@ those of the \pkg{posterior} package:
 chains with Geyer's (1992) initial monotone sequence; \code{MCSE = SD / sqrt(ESS)} and \code{IAT = N / ESS}, where \code{N} is the number of retained
 draws. The IAT is the integrated autocorrelation time used by
 Christen & Fox (2010) to compare samplers.
+\item \code{IAT_n} is the IAT divided by the dimension \code{n} (the number of columns
+of \code{samples}). Christen & Fox (2010, Section 4) found that for the
+t-walk the IAT grows roughly linearly with the dimension, so \code{IAT_n}
+stays bounded (below 15 in most of their examples) where common
+Metropolis-Hastings samplers degrade. It is computed from the stored
+draws, so with thinning it refers to the thinned chain.
 \item \code{ESS_bulk} and \code{ESS_tail} are the rank-normalized bulk and tail
 effective sample sizes.
 \item \code{Rhat} is the rank-normalized split-R-hat (the maximum of its bulk and
@@ -50,6 +57,20 @@ for a single chain. Values above 1.01 indicate lack of convergence.
 When chains have different lengths, ESS and R-hat use the first draws of
 each chain up to the length of the shortest one.
 }
+\section{Diagnostics for the t-walk}{
+
+The t-walk is a reversible Metropolis-Hastings chain on the product space
+of the pair \eqn{(x, x')}, not on the space of \eqn{x} alone: the primary
+trajectory \eqn{x^{(t)}} returned in \code{samples} is not, by itself, a Markov
+chain. The diagnostics remain valid because each column of \code{samples} is a
+scalar function of the joint chain \eqn{(x^{(t)}, x'^{(t)})}, and the
+autocorrelation-based estimates (ESS, MCSE, IAT) and R-hat are applied to
+such one-dimensional functions one at a time. They should not be read as
+statements about \eqn{x^{(t)}} being a Markov chain, for example when
+combining it with methods that assume the Markov property of the
+sampled process itself.
+}
+
 \examples{
 log_post <- function(x) dnorm(x, log = TRUE)
 res <- twalk(log_post, n_iter = 2000, x0 = -2, xp0 = 2)

@@ -325,11 +325,11 @@ summary(rosenbrock, burnin_frac = 0.1)
 #> 
 #> CONVERGENCE DIAGNOSTICS (1 chain, 90000 draws after discarding 10% burn-in)
 #>  Parameter   Mean      SD    Q2.5 Median   Q97.5 ESS ESS_bulk ESS_tail   MCSE
-#>     theta1 1.2352  2.5034 -3.5509 1.0545  6.6110  41       42       30 0.3933
-#>     theta2 7.7930 10.8731 -0.2619 3.2953 43.4669  35       59       30 1.8369
-#>      IAT  Rhat
-#>  2222.00 1.072
-#>  2568.54 1.050
+#>     theta1 1.2352  2.5034 -3.5509 1.0545  6.6110  41       42       32 0.3933
+#>     theta2 7.7930 10.8731 -0.2619 3.2953 43.4669  35       59       32 1.8369
+#>      IAT   IAT_n  Rhat
+#>  2222.00 1111.00 1.072
+#>  2568.54 1284.27 1.050
 #> 
 #> Warning: R-hat > 1.01 for some parameters; the chains may not have converged.
 ```
@@ -401,7 +401,8 @@ paper), or $2.38/\sqrt{10}$ for every $n$ ("fixed scaling", dotted lines). The
 same RWM is applied to all models, while the t-walk is used with its
 defaults. We start both samplers at draws from the target, discard 10% of
 each run as burn-in, and estimate the IAT with Geyer's initial monotone
-sequence (`calculate_diagnostics()` reports it as `IAT`).
+sequence (`calculate_diagnostics()` reports it as `IAT`, and the ratio to the
+dimension as `IAT_n`).
 
 
 ``` r
@@ -622,12 +623,12 @@ Metropolis--Hastings algorithms. *Statistical Science*, 16(4), 351--367.
 
 ``` r
 sessionInfo()
-#> R version 4.3.0 (2023-04-21 ucrt)
-#> Platform: x86_64-w64-mingw32/x64 (64-bit)
+#> R version 4.6.2 (2026-10-29 ucrt)
+#> Platform: x86_64-w64-mingw32/x64
 #> Running under: Windows 11 x64 (build 26300)
 #> 
 #> Matrix products: default
-#> 
+#>   LAPACK version 3.12.1
 #> 
 #> locale:
 #> [1] LC_COLLATE=Portuguese_Brazil.utf8  LC_CTYPE=Portuguese_Brazil.utf8   
@@ -641,13 +642,13 @@ sessionInfo()
 #> [1] stats     graphics  grDevices utils     datasets  methods   base     
 #> 
 #> other attached packages:
-#> [1] Rtwalk_2.2.0   testthat_3.3.2
+#> [1] Rtwalk_2.3.0   testthat_3.3.2
 #> 
 #> loaded via a namespace (and not attached):
-#>  [1] digest_0.6.31    desc_1.4.3       R6_2.6.1         codetools_0.2-19
-#>  [5] xfun_0.52        lattice_0.22-6   magrittr_2.0.3   coda_0.19-4.1   
-#>  [9] knitr_1.50       parallel_4.3.0   lifecycle_1.0.5  cli_3.6.1       
-#> [13] grid_4.3.0       pkgload_1.5.1    compiler_4.3.0   rprojroot_2.1.1 
-#> [17] tools_4.3.0      pkgbuild_1.4.8   brio_1.1.5       evaluate_1.0.5  
-#> [21] Rcpp_1.0.10      rlang_1.1.7
+#>  [1] digest_0.6.39    desc_1.4.3       R6_2.6.1         codetools_0.2-20
+#>  [5] xfun_0.62        lattice_0.23-1   magrittr_2.0.5   coda_0.19-4.1   
+#>  [9] knitr_1.52       parallel_4.6.2   lifecycle_1.0.5  cli_3.6.6       
+#> [13] grid_4.6.2       pkgload_1.5.3    compiler_4.6.2   rprojroot_2.1.1 
+#> [17] tools_4.6.2      pkgbuild_1.4.8   brio_1.1.5       evaluate_1.0.5  
+#> [21] Rcpp_1.1.2       otel_0.3.0       rlang_1.3.0
 ```

@@ -4,7 +4,8 @@
 // R/twalk_engine.R (Christen & Fox, 2010). Random numbers are drawn from R's
 // generator in exactly the same order as the reference implementation, so
 // both engines produce identical chains for the same seed; the test suite
-// checks this property.
+// checks this property. The optional fifth move is the gradient-free
+// penalised move of Medina-Aguayo & Christen (2022).
 //
 // The engine is resumable: its state lives in an external pointer. When the
 // user's log posterior raises an R error, the error unwinds out of
@@ -21,7 +22,8 @@ using namespace Rcpp;
 
 namespace {
 
-enum Kernel { TRAVERSE = 0, WALK = 1, BLOW = 2, HOP = 3 };
+enum Kernel { TRAVERSE = 0, WALK = 1, BLOW = 2, HOP = 3, PENALTY = 4 };
+const int N_KERNELS = 5;
 
 struct TwalkEngine {
   int n;
@@ -36,13 +38,14 @@ struct TwalkEngine {
 
   double p_phi, aw, at;
   double cum_probs[4];
+  double penalty_prob, penalty_kappa;
   bool store_companion;
 
   NumericMatrix out_x, out_xp;
   NumericVector out_lp_x, out_lp_xp;
   RObject names;
 
-  int proposed[4], accepted[4], moved[4];
+  int proposed[N_KERNELS], accepted[N_KERNELS], moved[N_KERNELS];
 
   // State of an iteration interrupted while evaluating the log posterior.
   bool pending;
@@ -147,6 +150,101 @@ double checked_log_posterior(TwalkEngine* e, SEXP call,
   return lp;
 }
 
+// Common shift of the penalised move. Mirrors `penalty_shift()` in
+// R/twalk_engine.R (Medina-Aguayo & Christen, 2022, Algorithm 2).
+void penalty_shift(const std::vector<double>& x, const std::vector<double>& xp,
+                   double kappa, std::vector<double>& delta) {
+  const std::size_t n = x.size();
+  std::vector<double> scale(n), z(n);
+  int n_active = 0;
+  for (std::size_t j = 0; j < n; ++j) {
+    scale[j] = std::fabs(x[j] - xp[j]);
+    if (scale[j] > 0.0) n_active += 1;
+  }
+  if (n_active == 0) {
+    for (std::size_t j = 0; j < n; ++j) delta[j] = 0.0;
+    return;
+  }
+
+  double zeta;
+  while (true) {
+    zeta = norm_rand();
+    for (std::size_t j = 0; j < n; ++j) z[j] = norm_rand();
+    double omega = unif_rand();
+    if (zeta == 0.0) continue;  // # nocov
+    long double ss = 0.0;
+    for (std::size_t j = 0; j < n; ++j) {
+      if (scale[j] > 0.0) ss += z[j] * z[j];
+    }
+    double q = (kappa * kappa * static_cast<double>(ss)) / (zeta * zeta);
+    double phi = 1.0 - std::exp(-(n_active + 2.0) / 2.0 * std::log1p(q / 2.0));
+    if (!(phi < omega)) break;
+  }
+
+  for (std::size_t j = 0; j < n; ++j) {
+    delta[j] = kappa * scale[j] * z[j] / std::fabs(zeta);
+  }
+}
+
+bool all_finite(const std::vector<double>& v) {
+  for (std::size_t j = 0; j < v.size(); ++j) {
+    if (!R_FINITE(v[j])) return false;
+  }
+  return true;
+}
+
+// Penalised move: both points are shifted by the same vector, by equation (5)
+// of Medina-Aguayo & Christen (2022) or, when `swap` is true, with their
+// labels exchanged (equation 6). Mirrors `penalty_step()` in R.
+void penalty_step(TwalkEngine* e, SEXP call, bool swap) {
+  const int n = e->n;
+  e->proposed[PENALTY] += 1;
+
+  std::vector<double> delta(n), new_x(n), new_xp(n);
+  penalty_shift(e->x, e->xp, e->penalty_kappa, delta);
+  const std::vector<double>& first = swap ? e->xp : e->x;
+  const std::vector<double>& second = swap ? e->x : e->xp;
+  for (int j = 0; j < n; ++j) {
+    new_x[j] = first[j] + delta[j];
+    new_xp[j] = second[j] + delta[j];
+  }
+
+  bool identity = true;
+  for (int j = 0; j < n; ++j) {
+    if (new_x[j] != e->x[j] || new_xp[j] != e->xp[j]) {
+      identity = false;
+      break;
+    }
+  }
+
+  double alpha = 0.0;
+  double lp_new_x = e->lp_x;
+  double lp_new_xp = e->lp_xp;
+  if (identity) {
+    alpha = 1.0;
+  } else if (all_finite(new_x) && all_finite(new_xp)) {
+    lp_new_x = checked_log_posterior(e, call, new_x);
+    if (R_FINITE(lp_new_x)) {
+      lp_new_xp = checked_log_posterior(e, call, new_xp);
+      if (R_FINITE(lp_new_xp)) {
+        double log_alpha = (lp_new_x + lp_new_xp) - (e->lp_x + e->lp_xp);
+        alpha = (log_alpha >= 0.0) ? 1.0 : std::exp(log_alpha);
+      }
+    }
+  }
+
+  if (unif_rand() < alpha) {
+    e->x = new_x;
+    e->xp = new_xp;
+    e->lp_x = lp_new_x;
+    e->lp_xp = lp_new_xp;
+    e->accepted[PENALTY] += 1;
+    if (!identity) e->moved[PENALTY] += 1;
+  }
+
+  store_iteration(e);
+}
+
 // One t-walk transition. Mirrors `.engine_r_step()` in R/twalk_engine.R.
 void step(TwalkEngine* e, SEXP call) {
   const int n = e->n;
@@ -159,7 +257,16 @@ void step(TwalkEngine* e, SEXP call) {
       break;
     }
   }
+  if (kernel == HOP && e->penalty_prob > 0.0 &&
+      u_kernel >= 1.0 - e->penalty_prob) {
+    kernel = PENALTY;
+  }
   bool move_xp = unif_rand() < 0.5;
+
+  if (kernel == PENALTY) {
+    penalty_step(e, call, move_xp);
+    return;
+  }
 
   // `a` is the point being moved and `b` the other point: the paper's
   // proposals (x, h(x', x)) and (h(x, x'), x') respectively.
@@ -278,7 +385,8 @@ SEXP twalk_engine_new(NumericVector x0, NumericVector xp0,
                       double lp_x0, double lp_xp0,
                       int n_iter, int thin, double p_phi,
                       double aw, double at, NumericVector cum_probs,
-                      bool store_companion, SEXP names) {
+                      bool store_companion, SEXP names,
+                      double penalty_prob, double penalty_kappa) {
   TwalkEngine* e = new TwalkEngine();
   e->n = x0.size();
   e->n_iter = n_iter;
@@ -293,8 +401,12 @@ SEXP twalk_engine_new(NumericVector x0, NumericVector xp0,
   e->p_phi = p_phi;
   e->aw = aw;
   e->at = at;
+  e->penalty_prob = penalty_prob;
+  e->penalty_kappa = penalty_kappa;
   for (int k = 0; k < 4; ++k) {
     e->cum_probs[k] = cum_probs[k];
+  }
+  for (int k = 0; k < N_KERNELS; ++k) {
     e->proposed[k] = 0;
     e->accepted[k] = 0;
     e->moved[k] = 0;
@@ -397,8 +509,8 @@ List twalk_engine_result(SEXP ptr) {
     }
   }
 
-  IntegerVector proposed(4), accepted(4), moved(4);
-  for (int k = 0; k < 4; ++k) {
+  IntegerVector proposed(N_KERNELS), accepted(N_KERNELS), moved(N_KERNELS);
+  for (int k = 0; k < N_KERNELS; ++k) {
     proposed[k] = e->proposed[k];
     accepted[k] = e->accepted[k];
     moved[k] = e->moved[k];

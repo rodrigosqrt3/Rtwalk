@@ -22,6 +22,10 @@ Highlights:
   points, thinning, continuation of runs (`twalk_continue()`), single
   transitions for Gibbs hybrids (`twalk_step()`), constrained supports and
   named parameters.
+* **Also outside R.** [twalk-cpp](https://github.com/rodrigosqrt3/twalk-cpp)
+  is the same kernel as a header-only C++ library, using the GNU Scientific
+  Library for random numbers. Driven by R's generator, it reproduces the
+  chains of this package draw by draw.
 
 ## Installation
 

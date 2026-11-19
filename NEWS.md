@@ -1,3 +1,37 @@
+# Rtwalk 2.3.0
+
+## Penalised t-walk
+
+* New `penalty_prob` and `penalty_kappa` arguments of `twalk_control()` add
+  the gradient-free penalised move of Medina-Aguayo & Christen (2022), a
+  fifth move that shifts both points together towards distant regions and
+  helps the chain jump between well-separated modes. It is off by default
+  (`penalty_prob = 0`), and the chains are then bit-for-bit identical to
+  those of version 2.2.0; a test checks this against stored output.
+* The move is implemented in both engines (C++ and the pure-R reference),
+  which produce identical chains. Its rejection sampler reproduces Table 1
+  of the paper, and the tests check that the move leaves the target
+  invariant.
+* When the move is used, `kernel_statistics` and `summary()` report it as a
+  fifth kernel, `"penalty"`.
+* New vignette, "The penalised t-walk", reproducing the examples of the
+  paper.
+
+## Other changes
+
+* The tail effective sample size now uses `x >= q` for the upper (95%)
+  quantile, following posterior 1.8.0. The estimate changes only when the
+  draws have ties at that quantile (for example, discrete parameters), and
+  it is now symmetric under a change of sign. This fixes the test failure
+  against posterior 1.8.0 reported on the CRAN checks.
+* `calculate_diagnostics()` and `summary()` report a new column, `IAT_n`:
+  the integrated autocorrelation time divided by the dimension, the measure
+  of efficiency used by Christen & Fox (2010, Section 4).
+* The documentation of `calculate_diagnostics()` explains why the
+  diagnostics are valid for the t-walk: the primary trajectory alone is not
+  a Markov chain, but each parameter is a scalar function of the joint
+  chain (x, x'), which is.
+
 # Rtwalk 2.2.0
 
 The algorithm is unchanged: it still follows Christen & Fox (2010) exactly,
