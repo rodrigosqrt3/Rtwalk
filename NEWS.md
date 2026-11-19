@@ -6,10 +6,11 @@
   the gradient-free penalised move of Medina-Aguayo & Christen (2022), a
   fifth move that shifts both points together towards distant regions and
   helps the chain jump between well-separated modes. It is off by default
-  (`penalty_prob = 0`), and the chains are then bit-for-bit identical to
-  those of version 2.2.0; a test checks this against stored output.
+  (`penalty_prob = 0`), and the chains are then the same as those of
+  version 2.2.0 (bit for bit on the same platform); a test checks this
+  against stored output.
 * The move is implemented in both engines (C++ and the pure-R reference),
-  which produce identical chains. Its rejection sampler reproduces Table 1
+  which produce the same chains up to floating-point rounding. Its rejection sampler reproduces Table 1
   of the paper, and the tests check that the move leaves the target
   invariant.
 * When the move is used, `kernel_statistics` and `summary()` report it as a
