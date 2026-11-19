@@ -35,9 +35,17 @@ test_that("without the penalised move the chains equal those of version 2.2.0", 
     multi <- twalk(log_post, n_iter = 1000, x0 = c(0, 1, -1), xp0 = c(1, -1, 0.5),
                    n_chains = 2, thin = 2, show_progress = FALSE, control = control)
 
+    # The reference was generated on Windows, where the chains must be bit for
+    # bit identical; elsewhere the maths library may round the last bits
+    # differently, so a tolerance is used.
+    compare <- if (.Platform$OS.type == "windows") {
+      expect_identical
+    } else {
+      function(object, expected) expect_equal(object, expected, tolerance = 1e-10)
+    }
     for (field in names(reference$single)) {
-      expect_identical(single[[field]], reference$single[[field]])
-      expect_identical(multi[[field]], reference$multi[[field]])
+      compare(single[[field]], reference$single[[field]])
+      compare(multi[[field]], reference$multi[[field]])
     }
   }
 })
@@ -52,10 +60,14 @@ run_both_engines_penalty <- function(log_post, n_iter, x0, xp0, ...) {
   })
 }
 
+# As in test-engine.R, the floating-point values may differ in the last bits
+# between the engines on some platforms (the C++ compiler and R's arithmetic
+# need not round alike), so they are compared with a tolerance; the accept and
+# reject decisions must still agree exactly.
 expect_same_penalised_chain <- function(runs) {
-  expect_identical(runs$cpp$samples, runs$R$samples)
-  expect_identical(runs$cpp$companion_samples, runs$R$companion_samples)
-  expect_identical(runs$cpp$log_posterior, runs$R$log_posterior)
+  expect_equal(runs$cpp$samples, runs$R$samples, tolerance = 1e-10)
+  expect_equal(runs$cpp$companion_samples, runs$R$companion_samples, tolerance = 1e-10)
+  expect_equal(runs$cpp$log_posterior, runs$R$log_posterior, tolerance = 1e-10)
   expect_identical(runs$cpp$kernel_statistics, runs$R$kernel_statistics)
   expect_identical(runs$cpp$n_evaluations, runs$R$n_evaluations)
   expect_identical(runs$cpp$n_errors, runs$R$n_errors)
