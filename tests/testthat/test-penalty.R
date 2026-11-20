@@ -35,10 +35,11 @@ test_that("without the penalised move the chains equal those of version 2.2.0", 
     multi <- twalk(log_post, n_iter = 1000, x0 = c(0, 1, -1), xp0 = c(1, -1, 0.5),
                    n_chains = 2, thin = 2, show_progress = FALSE, control = control)
 
-    # The reference was generated on Windows, where the chains must be bit for
-    # bit identical; elsewhere the maths library may round the last bits
-    # differently, so a tolerance is used.
-    compare <- if (.Platform$OS.type == "windows") {
+    # The reference was generated on x86_64 Windows, where the chains must be
+    # bit for bit identical; elsewhere (including Windows on ARM, where clang
+    # fuses multiply-adds) the last bits may be rounded differently, so a
+    # tolerance is used.
+    compare <- if (identical(R.version$platform, "x86_64-w64-mingw32")) {
       expect_identical
     } else {
       function(object, expected) expect_equal(object, expected, tolerance = 1e-10)
